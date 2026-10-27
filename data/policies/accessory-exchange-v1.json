@@ -1,0 +1,9 @@
+{
+  "policy_id": "accessory-exchange",
+  "version": "v1",
+  "title": "配件质量问题换货规则",
+  "category": "配件",
+  "effective_from": "2026-10-01",
+  "effective_until": null,
+  "content": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后15日内出现破损或与订单规格不符时，应确认订单商品、问题描述和签收时间，可以生成待确认的换货草稿。缺货与物流延误不等于已确认商品质量问题。正式提交需要用户确认。"
+}

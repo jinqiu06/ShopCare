@@ -1,0 +1,9 @@
+{
+  "policy_id": "accessory-after-window",
+  "version": "v1",
+  "title": "配件超期与信息不足处理规则",
+  "category": "配件",
+  "effective_from": "2026-10-01",
+  "effective_until": null,
+  "content": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件超过适用退换时限、缺少签收记录或无法确定是否使用时，不得作出确定的退换承诺。应说明缺失信息，必要时建议人工处理。不得套用数码商品规则或声称已经执行退款。"
+}

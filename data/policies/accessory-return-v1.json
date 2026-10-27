@@ -1,0 +1,9 @@
+{
+  "policy_id": "accessory-return",
+  "version": "v1",
+  "title": "配件非质量退货规则",
+  "category": "配件",
+  "effective_from": "2026-10-01",
+  "effective_until": null,
+  "content": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后10日内且无使用痕迹、包装和配件齐全时，可以生成非质量退货草稿；已经使用或信息不明确时，先澄清具体情况。只适用于配件类商品，不适用于数码主商品。正式提交需要用户确认。"
+}

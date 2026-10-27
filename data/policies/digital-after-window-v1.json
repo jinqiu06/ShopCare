@@ -1,0 +1,9 @@
+{
+  "policy_id": "digital-after-window",
+  "version": "v1",
+  "title": "数码商品超期咨询规则",
+  "category": "数码",
+  "effective_from": "2026-10-01",
+  "effective_until": null,
+  "content": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品超出对应退换时限时，说明当前自助政策无法确认退换资格，可以整理问题并建议人工处理。不得自动批准换货、承诺维修周期或实际退款。其他类别政策不得作为数码商品处理依据。"
+}

@@ -1,0 +1,1 @@
+"""ShopCare core package."""

@@ -1,0 +1,1 @@
+"""ShopCare api package."""
