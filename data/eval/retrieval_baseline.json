@@ -1,0 +1,82 @@
+[
+  {
+    "id": "Q01",
+    "query": "耳机单侧无声换货",
+    "category": "数码",
+    "as_of": "2026-11-02",
+    "expected_policy_id": "digital-exchange",
+    "expected_version": "v2"
+  },
+  {
+    "id": "Q02",
+    "query": "数码未拆封退货",
+    "category": "数码",
+    "as_of": "2026-11-02",
+    "expected_policy_id": "digital-return",
+    "expected_version": "v2"
+  },
+  {
+    "id": "Q03",
+    "query": "耳机故障超期人工处理",
+    "category": "数码",
+    "as_of": "2026-11-02",
+    "expected_policy_id": "digital-after-window",
+    "expected_version": "v1"
+  },
+  {
+    "id": "Q04",
+    "query": "配件包装齐全未使用退货",
+    "category": "配件",
+    "as_of": "2026-11-02",
+    "expected_policy_id": "accessory-return",
+    "expected_version": "v1"
+  },
+  {
+    "id": "Q05",
+    "query": "配件破损规格不符换货",
+    "category": "配件",
+    "as_of": "2026-11-02",
+    "expected_policy_id": "accessory-exchange",
+    "expected_version": "v1"
+  },
+  {
+    "id": "Q06",
+    "query": "配件超期签收记录缺失",
+    "category": "配件",
+    "as_of": "2026-11-02",
+    "expected_policy_id": "accessory-after-window",
+    "expected_version": "v1"
+  },
+  {
+    "id": "Q07",
+    "query": "耳机质量问题换货",
+    "category": "数码",
+    "as_of": "2026-09-30",
+    "expected_policy_id": "digital-exchange",
+    "expected_version": "v1"
+  },
+  {
+    "id": "Q08",
+    "query": "耳机质量问题换货",
+    "category": "数码",
+    "as_of": "2026-10-01",
+    "expected_policy_id": "digital-exchange",
+    "expected_version": "v2"
+  },
+  {
+    "id": "Q09",
+    "query": "左边听不见了想换一副",
+    "category": "数码",
+    "as_of": "2026-11-02",
+    "expected_policy_id": "digital-exchange",
+    "expected_version": "v2"
+  },
+  {
+    "id": "Q10",
+    "query": "zzzzuniquenomatch",
+    "category": "数码",
+    "as_of": "2026-11-02",
+    "expected_policy_id": null,
+    "expected_version": null
+  }
+]

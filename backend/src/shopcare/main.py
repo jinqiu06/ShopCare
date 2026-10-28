@@ -7,6 +7,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from shopcare.api.errors import http_error_handler, validation_error_handler
 from shopcare.api.health import router as health_router
 from shopcare.api.orders import router as orders_router
+from shopcare.api.policies import router as policies_router
 from shopcare.core.config import Settings
 from shopcare.db import build_engine
 
@@ -29,3 +30,4 @@ app.add_exception_handler(StarletteHTTPException, http_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
 app.include_router(health_router)
 app.include_router(orders_router)
+app.include_router(policies_router)

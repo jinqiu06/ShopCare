@@ -22,7 +22,7 @@
 
 ## 开发者负责的核心实现
 
-按整理后的目录，在开始实现时创建 `schemas/policies.py` 与 `services/policy_loader.py`；当前尚未创建。
+已实现 `schemas/policy_models.py` 与 `services/policy_loader.py`，文件加载及以下校验已通过测试。
 
 1. 用 Pydantic BaseModel 定义 PolicyDocument，日期用 date，正文保留原文。
 2. load_policy(path: Path) -> PolicyDocument：UTF-8 读取并校验一个 JSON 文件。
@@ -34,3 +34,26 @@
 ## 助手负责的验证
 
 正常读取八份样例、中文和日期解析、历史版本保留、稳定顺序、缺失与空目录、非法 JSON、缺失字段、空白字段、非法日期区间、未声明字段和重复唯一键。
+
+
+## 已实现：适用政策过滤
+
+已在 `services/policy_filter.py` 中实现两个纯函数，不做文件读取、数据库访问或模型调用：
+
+- is_policy_effective(policy, as_of)：有效区间为 effective_from <= as_of < effective_until；无结束日期只检查开始日期。
+- filter_applicable_policies(policies, category, as_of)：同时按精确类别和有效日期筛选，保留输入顺序；不改动原列表，也不删除历史版本。
+
+日期由调用者显式提供，不从 date.today() 读取。版本号不代表生效状态，不能只挑字符串最大的 version。当前只判断政策是否适用，不判断订单最终退换资格。
+
+样例参照 2026-11-02：八份政策中六份有效，数码与配件各三份；数码旧版在 2026-10-01 当天已失效。
+
+
+## 下一步：可追溯的切分基线
+
+在 schemas/policy_models.py 定义 PolicyChunk，在 services/policy_chunker.py 实现 split_policy。第一版按 Python 字符位置切片，不按字节或 token 计数。
+
+默认 chunk_size=300、overlap=50；要求 chunk_size 为正整数且 0 <= overlap < chunk_size。片段位置为 [start_char, end_char)，text 必须等于原文相应切片，不 strip 或改写原文。
+
+每片保留 policy_id、version、title、category、effective_from、effective_until，以及 chunk_id、text、start_char、end_char。chunk_id 由政策 ID、版本和从 0 开始的片段序号组成；同一政策版本的正文后续按不可变处理，若更新必须更换版本并重建索引。
+
+每个片段最长 chunk_size；相邻窗口有 overlap 个字符的重叠。最后一个窗口覆盖原文尾部后立即停止，不再生成只包含上一个尾部的重复片段。短政策保留为单片，不为凑数量强制切碎。固定窗口只是第一版基线，后续按评测考虑段落边界切分。
