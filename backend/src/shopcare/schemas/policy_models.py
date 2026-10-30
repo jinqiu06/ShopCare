@@ -49,3 +49,8 @@ class PolicyChunk(BaseModel):
 class PolicySearchHit(BaseModel):
     chunk: PolicyChunk
     score: int = Field(ge=1)
+
+
+class SemanticPolicySearchHit(BaseModel):
+    chunk: PolicyChunk
+    score: float = Field(allow_inf_nan=False)

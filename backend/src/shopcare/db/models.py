@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, CheckConstraint, Date, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from shopcare.db.base import Base
@@ -117,13 +117,76 @@ class PolicyChunkRecord(Base):
         ),
     )
 
-    chunk_id: Mapped[str] = mapped_column(String(255), primary_key=True)
-    policy_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
-    version: Mapped[str] = mapped_column(String(50), nullable=False)
-    title: Mapped[str] = mapped_column(String(200), nullable=False)
-    category: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
-    effective_until: Mapped[date | None] = mapped_column(Date, nullable=True)
-    text: Mapped[str] = mapped_column(Text, nullable=False)
-    start_char: Mapped[int] = mapped_column(Integer, nullable=False)
-    end_char: Mapped[int] = mapped_column(Integer, nullable=False)
+    chunk_id: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+    )
+    policy_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+    version: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+    )
+    title: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+    )
+    category: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+    )
+    effective_from: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+    )
+    effective_until: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+    text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    start_char: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    end_char: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+
+class PolicyEmbeddingRecord(Base):
+    __tablename__ = "policy_embeddings"
+
+    __table_args__ = (
+        CheckConstraint(
+            "dimensions > 0",
+            name="ck_policy_embeddings_dimensions_positive",
+        ),
+    )
+
+    chunk_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("policy_chunks.chunk_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    model_id: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+    )
+    dimensions: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    vector: Mapped[list[float]] = mapped_column(
+        JSON,
+        nullable=False,
+    )

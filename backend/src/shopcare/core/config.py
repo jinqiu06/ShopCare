@@ -1,4 +1,4 @@
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,6 +8,11 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = None
     llm_model_id: str | None = None
     llm_base_url: str | None = None
+
+    embedding_api_key: SecretStr | None = None
+    embedding_model_id: str = "text-embedding-v4"
+    embedding_base_url: str | None = None
+    embedding_dimensions: int = Field(default=1024, gt=0)
 
     model_config = SettingsConfigDict(
         env_file=".env",

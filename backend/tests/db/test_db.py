@@ -143,4 +143,10 @@ def test_init_registers_models_in_fresh_process():
         timeout=30,
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == ["order_items", "orders", "policy_chunks", "users"]
+    assert json.loads(result.stdout) == [
+        "order_items",
+        "orders",
+        "policy_chunks",
+        "policy_embeddings",
+        "users",
+    ]

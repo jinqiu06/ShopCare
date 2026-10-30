@@ -11,6 +11,10 @@ def clear_settings_env(monkeypatch):
         "LLM_API_KEY",
         "LLM_MODEL_ID",
         "LLM_BASE_URL",
+        "EMBEDDING_API_KEY",
+        "EMBEDDING_MODEL_ID",
+        "EMBEDDING_BASE_URL",
+        "EMBEDDING_DIMENSIONS",
     ]
 
     for name in names:
@@ -25,6 +29,10 @@ def test_settings_defaults():
     assert settings.llm_api_key is None
     assert settings.llm_model_id is None
     assert settings.llm_base_url is None
+    assert settings.embedding_api_key is None
+    assert settings.embedding_model_id == "text-embedding-v4"
+    assert settings.embedding_base_url is None
+    assert settings.embedding_dimensions == 1024
 
 
 def test_settings_from_environment(monkeypatch):
@@ -60,3 +68,20 @@ def test_environment_overrides_env_file(tmp_path, monkeypatch):
     settings = Settings(_env_file=env_file)
 
     assert settings.app_name == "Name From Environment"
+
+
+def test_embedding_settings_from_env_file(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "EMBEDDING_API_KEY=test-only-key\n"
+        "EMBEDDING_MODEL_ID=text-embedding-v4\n"
+        "EMBEDDING_BASE_URL=https://example.com/v1\n"
+        "EMBEDDING_DIMENSIONS=512\n",
+        encoding="utf-8",
+    )
+    settings = Settings(_env_file=env_file)
+    assert settings.embedding_api_key.get_secret_value() == "test-only-key"
+    assert settings.embedding_model_id == "text-embedding-v4"
+    assert settings.embedding_base_url == "https://example.com/v1"
+    assert settings.embedding_dimensions == 512
+    assert "test-only-key" not in repr(settings)

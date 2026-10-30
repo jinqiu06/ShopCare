@@ -149,3 +149,33 @@ backend/
 ```
 
 复现命令使用独立临时数据库，通过 HTTP 路由运行 [十个固定问题](data/eval/retrieval_baseline.json)，不修改演示库。结果见 [检索基线报告](docs/retrieval-baseline.md)：九个有目标政策案例 Hit@1 与 Hit@3 均为8/9，一个预期无结果案例正确返回空列表。口语改写案例未命中，说明词法基线的同义表达局限。本组问题仅用于初始开发诊断，不代表真实场景准确率，也不是独立保留评测集。
+
+
+## 构建政策向量索引
+
+先使用政策导入命令准备片段，再预览并构建向量：
+
+```powershell
+.venv/Scripts/python -m shopcare.scripts.build_policy_index --dry-run
+.venv/Scripts/python -m shopcare.scripts.build_policy_index
+```
+
+预览不调用模型或修改数据库。正式构建会将数据库中所有政策片段（包括历史版本）的标题和正文发送给配置的 embedding 服务，按客户端每批 10 条处理，产生 API 用量。配置使用 EMBEDDING_MODEL_ID、EMBEDDING_BASE_URL、EMBEDDING_DIMENSIONS；EMBEDDING_API_KEY 留空时复用 LLM_API_KEY。
+
+模型调用全部完成后，复用核心保存服务在一个事务中替换本批向量。重复运行仍会调用模型，但不会增加重复记录；调用或写入失败保留原向量。调用期间检测到片段变化会拒绝保存，需要重跑。重新导入政策会级联删除对应向量，需要重新构建；更换模型或维度也需要重建。支持 --database-url 指定已有本地 SQLite 文件。当前检索 API 仍是词法检索，语义查询尚待接入。
+
+
+## 语义检索与词法对照
+
+语义搜索服务先复用类别和生效日期过滤，检查候选向量的模型、维度和完整性，再生成问题向量，按余弦相似度和片段 ID 稳定排序。当前 HTTP 搜索接口仍使用词法服务；语义服务通过评测命令直接调用。
+
+```powershell
+# 只预览，不调用模型
+.venv/Scripts/python -m shopcare.scripts.compare_retrieval
+# 实际运行：最多 10 次问题向量调用，复用已保存政策向量，不修改数据库
+.venv/Scripts/python -m shopcare.scripts.compare_retrieval --run
+```
+
+2026-10-30 十个固定开发案例中，九个正例的 Hit@1/Hit@3：词法均为 8/9，语义均为 9/9；一个无关问题的正确空返回：词法 1/1，语义 0/1。口语换货问题得到改善，但没有相关性阈值的语义检索仍会向无关问题返回候选。本组小样本不是独立保留集，不代表真实业务准确率；本轮没有据此调阈值或添加混合检索。
+
+详见 [对照报告](docs/retrieval-comparison.md) 和 [逐题结果](docs/retrieval-comparison.json)。报告记录模型、维度、案例/索引指纹、候选与分数、单次耗时及调用数；两种分数不能直接比较，单次耗时也不是性能基准。网络错误会终止评测，不作为未命中计入统计。

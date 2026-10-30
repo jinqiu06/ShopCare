@@ -1,0 +1,996 @@
+{
+  "started_at_utc": "2026-10-30T09:27:15.393378+00:00",
+  "model_id": "text-embedding-v4",
+  "dimensions": 1024,
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "cases_sha256": "4cc606de885c6cb94e41a64e66f04a68045e38096e2c92c33e885e8bc75c3747",
+  "index_sha256": "98c727a0b35388d8ea70714d54787a7e021d9029bc82f26a99da5be46206397c",
+  "query_model_calls": 10,
+  "top_k": 3,
+  "summary": {
+    "lexical": {
+      "positive_cases": 9,
+      "hit_at_1": 8,
+      "hit_at_3": 8,
+      "negative_cases": 1,
+      "correct_empty": 1
+    },
+    "semantic": {
+      "positive_cases": 9,
+      "hit_at_1": 9,
+      "hit_at_3": 9,
+      "negative_cases": 1,
+      "correct_empty": 0
+    }
+  },
+  "rows": [
+    {
+      "case": {
+        "id": "Q01",
+        "query": "耳机单侧无声换货",
+        "category": "数码",
+        "as_of": "2026-11-02",
+        "expected_policy_id": "digital-exchange",
+        "expected_version": "v2"
+      },
+      "lexical": {
+        "rank": 1,
+        "elapsed_ms": 1.1,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "digital-exchange:v2:000",
+              "policy_id": "digital-exchange",
+              "version": "v2",
+              "title": "数码质量问题换货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品签收后15日内出现质量问题，可以收集故障描述、目标商品和签收时间后生成换货草稿。例如耳机单侧无声应补充故障表现，不能虚构检测结果。超过时限不能直接承诺换货，应说明需要进一步处理。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 136
+            },
+            "score": 6
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-after-window:v1:000",
+              "policy_id": "digital-after-window",
+              "version": "v1",
+              "title": "数码商品超期咨询规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品超出对应退换时限时，说明当前自助政策无法确认退换资格，可以整理问题并建议人工处理。不得自动批准换货、承诺维修周期或实际退款。其他类别政策不得作为数码商品处理依据。",
+              "start_char": 0,
+              "end_char": 117
+            },
+            "score": 1
+          }
+        ]
+      },
+      "semantic": {
+        "rank": 1,
+        "elapsed_ms": 299.87,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "digital-exchange:v2:000",
+              "policy_id": "digital-exchange",
+              "version": "v2",
+              "title": "数码质量问题换货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品签收后15日内出现质量问题，可以收集故障描述、目标商品和签收时间后生成换货草稿。例如耳机单侧无声应补充故障表现，不能虚构检测结果。超过时限不能直接承诺换货，应说明需要进一步处理。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 136
+            },
+            "score": 0.4973711125314642
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-after-window:v1:000",
+              "policy_id": "digital-after-window",
+              "version": "v1",
+              "title": "数码商品超期咨询规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品超出对应退换时限时，说明当前自助政策无法确认退换资格，可以整理问题并建议人工处理。不得自动批准换货、承诺维修周期或实际退款。其他类别政策不得作为数码商品处理依据。",
+              "start_char": 0,
+              "end_char": 117
+            },
+            "score": 0.42462066002218646
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-return:v2:000",
+              "policy_id": "digital-return",
+              "version": "v2",
+              "title": "数码商品非质量退货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品非质量问题退货：在签收后10日内提出，且商品未拆封、无使用痕迹、配件齐全时，可生成退货申请草稿。是否拆封、签收日期或配件情况不明时，应先询问；不符合条件不能承诺退货。提交须经用户明确确认。",
+              "start_char": 0,
+              "end_char": 130
+            },
+            "score": 0.3688355531000378
+          }
+        ]
+      }
+    },
+    {
+      "case": {
+        "id": "Q02",
+        "query": "数码未拆封退货",
+        "category": "数码",
+        "as_of": "2026-11-02",
+        "expected_policy_id": "digital-return",
+        "expected_version": "v2"
+      },
+      "lexical": {
+        "rank": 1,
+        "elapsed_ms": 0.72,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "digital-return:v2:000",
+              "policy_id": "digital-return",
+              "version": "v2",
+              "title": "数码商品非质量退货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品非质量问题退货：在签收后10日内提出，且商品未拆封、无使用痕迹、配件齐全时，可生成退货申请草稿。是否拆封、签收日期或配件情况不明时，应先询问；不符合条件不能承诺退货。提交须经用户明确确认。",
+              "start_char": 0,
+              "end_char": 130
+            },
+            "score": 4
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-after-window:v1:000",
+              "policy_id": "digital-after-window",
+              "version": "v1",
+              "title": "数码商品超期咨询规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品超出对应退换时限时，说明当前自助政策无法确认退换资格，可以整理问题并建议人工处理。不得自动批准换货、承诺维修周期或实际退款。其他类别政策不得作为数码商品处理依据。",
+              "start_char": 0,
+              "end_char": 117
+            },
+            "score": 1
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-exchange:v2:000",
+              "policy_id": "digital-exchange",
+              "version": "v2",
+              "title": "数码质量问题换货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品签收后15日内出现质量问题，可以收集故障描述、目标商品和签收时间后生成换货草稿。例如耳机单侧无声应补充故障表现，不能虚构检测结果。超过时限不能直接承诺换货，应说明需要进一步处理。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 136
+            },
+            "score": 1
+          }
+        ]
+      },
+      "semantic": {
+        "rank": 1,
+        "elapsed_ms": 128.11,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "digital-return:v2:000",
+              "policy_id": "digital-return",
+              "version": "v2",
+              "title": "数码商品非质量退货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品非质量问题退货：在签收后10日内提出，且商品未拆封、无使用痕迹、配件齐全时，可生成退货申请草稿。是否拆封、签收日期或配件情况不明时，应先询问；不符合条件不能承诺退货。提交须经用户明确确认。",
+              "start_char": 0,
+              "end_char": 130
+            },
+            "score": 0.757858050559524
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-exchange:v2:000",
+              "policy_id": "digital-exchange",
+              "version": "v2",
+              "title": "数码质量问题换货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品签收后15日内出现质量问题，可以收集故障描述、目标商品和签收时间后生成换货草稿。例如耳机单侧无声应补充故障表现，不能虚构检测结果。超过时限不能直接承诺换货，应说明需要进一步处理。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 136
+            },
+            "score": 0.6421119544629981
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-after-window:v1:000",
+              "policy_id": "digital-after-window",
+              "version": "v1",
+              "title": "数码商品超期咨询规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品超出对应退换时限时，说明当前自助政策无法确认退换资格，可以整理问题并建议人工处理。不得自动批准换货、承诺维修周期或实际退款。其他类别政策不得作为数码商品处理依据。",
+              "start_char": 0,
+              "end_char": 117
+            },
+            "score": 0.6342696192204086
+          }
+        ]
+      }
+    },
+    {
+      "case": {
+        "id": "Q03",
+        "query": "耳机故障超期人工处理",
+        "category": "数码",
+        "as_of": "2026-11-02",
+        "expected_policy_id": "digital-after-window",
+        "expected_version": "v1"
+      },
+      "lexical": {
+        "rank": 1,
+        "elapsed_ms": 0.58,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "digital-after-window:v1:000",
+              "policy_id": "digital-after-window",
+              "version": "v1",
+              "title": "数码商品超期咨询规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品超出对应退换时限时，说明当前自助政策无法确认退换资格，可以整理问题并建议人工处理。不得自动批准换货、承诺维修周期或实际退款。其他类别政策不得作为数码商品处理依据。",
+              "start_char": 0,
+              "end_char": 117
+            },
+            "score": 4
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-exchange:v2:000",
+              "policy_id": "digital-exchange",
+              "version": "v2",
+              "title": "数码质量问题换货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品签收后15日内出现质量问题，可以收集故障描述、目标商品和签收时间后生成换货草稿。例如耳机单侧无声应补充故障表现，不能虚构检测结果。超过时限不能直接承诺换货，应说明需要进一步处理。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 136
+            },
+            "score": 3
+          }
+        ]
+      },
+      "semantic": {
+        "rank": 1,
+        "elapsed_ms": 131.41,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "digital-after-window:v1:000",
+              "policy_id": "digital-after-window",
+              "version": "v1",
+              "title": "数码商品超期咨询规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品超出对应退换时限时，说明当前自助政策无法确认退换资格，可以整理问题并建议人工处理。不得自动批准换货、承诺维修周期或实际退款。其他类别政策不得作为数码商品处理依据。",
+              "start_char": 0,
+              "end_char": 117
+            },
+            "score": 0.6196418691546365
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-exchange:v2:000",
+              "policy_id": "digital-exchange",
+              "version": "v2",
+              "title": "数码质量问题换货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品签收后15日内出现质量问题，可以收集故障描述、目标商品和签收时间后生成换货草稿。例如耳机单侧无声应补充故障表现，不能虚构检测结果。超过时限不能直接承诺换货，应说明需要进一步处理。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 136
+            },
+            "score": 0.5248038556574233
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-return:v2:000",
+              "policy_id": "digital-return",
+              "version": "v2",
+              "title": "数码商品非质量退货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品非质量问题退货：在签收后10日内提出，且商品未拆封、无使用痕迹、配件齐全时，可生成退货申请草稿。是否拆封、签收日期或配件情况不明时，应先询问；不符合条件不能承诺退货。提交须经用户明确确认。",
+              "start_char": 0,
+              "end_char": 130
+            },
+            "score": 0.4567304693064143
+          }
+        ]
+      }
+    },
+    {
+      "case": {
+        "id": "Q04",
+        "query": "配件包装齐全未使用退货",
+        "category": "配件",
+        "as_of": "2026-11-02",
+        "expected_policy_id": "accessory-return",
+        "expected_version": "v1"
+      },
+      "lexical": {
+        "rank": 1,
+        "elapsed_ms": 0.6,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "accessory-return:v1:000",
+              "policy_id": "accessory-return",
+              "version": "v1",
+              "title": "配件非质量退货规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后10日内且无使用痕迹、包装和配件齐全时，可以生成非质量退货草稿；已经使用或信息不明确时，先澄清具体情况。只适用于配件类商品，不适用于数码主商品。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 121
+            },
+            "score": 5
+          },
+          {
+            "chunk": {
+              "chunk_id": "accessory-after-window:v1:000",
+              "policy_id": "accessory-after-window",
+              "version": "v1",
+              "title": "配件超期与信息不足处理规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件超过适用退换时限、缺少签收记录或无法确定是否使用时，不得作出确定的退换承诺。应说明缺失信息，必要时建议人工处理。不得套用数码商品规则或声称已经执行退款。",
+              "start_char": 0,
+              "end_char": 110
+            },
+            "score": 3
+          },
+          {
+            "chunk": {
+              "chunk_id": "accessory-exchange:v1:000",
+              "policy_id": "accessory-exchange",
+              "version": "v1",
+              "title": "配件质量问题换货规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后15日内出现破损或与订单规格不符时，应确认订单商品、问题描述和签收时间，可以生成待确认的换货草稿。缺货与物流延误不等于已确认商品质量问题。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 118
+            },
+            "score": 1
+          }
+        ]
+      },
+      "semantic": {
+        "rank": 1,
+        "elapsed_ms": 149.35,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "accessory-return:v1:000",
+              "policy_id": "accessory-return",
+              "version": "v1",
+              "title": "配件非质量退货规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后10日内且无使用痕迹、包装和配件齐全时，可以生成非质量退货草稿；已经使用或信息不明确时，先澄清具体情况。只适用于配件类商品，不适用于数码主商品。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 121
+            },
+            "score": 0.6950779872555475
+          },
+          {
+            "chunk": {
+              "chunk_id": "accessory-after-window:v1:000",
+              "policy_id": "accessory-after-window",
+              "version": "v1",
+              "title": "配件超期与信息不足处理规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件超过适用退换时限、缺少签收记录或无法确定是否使用时，不得作出确定的退换承诺。应说明缺失信息，必要时建议人工处理。不得套用数码商品规则或声称已经执行退款。",
+              "start_char": 0,
+              "end_char": 110
+            },
+            "score": 0.6436997628880257
+          },
+          {
+            "chunk": {
+              "chunk_id": "accessory-exchange:v1:000",
+              "policy_id": "accessory-exchange",
+              "version": "v1",
+              "title": "配件质量问题换货规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后15日内出现破损或与订单规格不符时，应确认订单商品、问题描述和签收时间，可以生成待确认的换货草稿。缺货与物流延误不等于已确认商品质量问题。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 118
+            },
+            "score": 0.6183919337915642
+          }
+        ]
+      }
+    },
+    {
+      "case": {
+        "id": "Q05",
+        "query": "配件破损规格不符换货",
+        "category": "配件",
+        "as_of": "2026-11-02",
+        "expected_policy_id": "accessory-exchange",
+        "expected_version": "v1"
+      },
+      "lexical": {
+        "rank": 1,
+        "elapsed_ms": 1.1,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "accessory-exchange:v1:000",
+              "policy_id": "accessory-exchange",
+              "version": "v1",
+              "title": "配件质量问题换货规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后15日内出现破损或与订单规格不符时，应确认订单商品、问题描述和签收时间，可以生成待确认的换货草稿。缺货与物流延误不等于已确认商品质量问题。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 118
+            },
+            "score": 6
+          },
+          {
+            "chunk": {
+              "chunk_id": "accessory-after-window:v1:000",
+              "policy_id": "accessory-after-window",
+              "version": "v1",
+              "title": "配件超期与信息不足处理规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件超过适用退换时限、缺少签收记录或无法确定是否使用时，不得作出确定的退换承诺。应说明缺失信息，必要时建议人工处理。不得套用数码商品规则或声称已经执行退款。",
+              "start_char": 0,
+              "end_char": 110
+            },
+            "score": 1
+          },
+          {
+            "chunk": {
+              "chunk_id": "accessory-return:v1:000",
+              "policy_id": "accessory-return",
+              "version": "v1",
+              "title": "配件非质量退货规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后10日内且无使用痕迹、包装和配件齐全时，可以生成非质量退货草稿；已经使用或信息不明确时，先澄清具体情况。只适用于配件类商品，不适用于数码主商品。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 121
+            },
+            "score": 1
+          }
+        ]
+      },
+      "semantic": {
+        "rank": 1,
+        "elapsed_ms": 159.73,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "accessory-exchange:v1:000",
+              "policy_id": "accessory-exchange",
+              "version": "v1",
+              "title": "配件质量问题换货规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后15日内出现破损或与订单规格不符时，应确认订单商品、问题描述和签收时间，可以生成待确认的换货草稿。缺货与物流延误不等于已确认商品质量问题。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 118
+            },
+            "score": 0.7989156223161807
+          },
+          {
+            "chunk": {
+              "chunk_id": "accessory-return:v1:000",
+              "policy_id": "accessory-return",
+              "version": "v1",
+              "title": "配件非质量退货规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后10日内且无使用痕迹、包装和配件齐全时，可以生成非质量退货草稿；已经使用或信息不明确时，先澄清具体情况。只适用于配件类商品，不适用于数码主商品。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 121
+            },
+            "score": 0.6671924240399248
+          },
+          {
+            "chunk": {
+              "chunk_id": "accessory-after-window:v1:000",
+              "policy_id": "accessory-after-window",
+              "version": "v1",
+              "title": "配件超期与信息不足处理规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件超过适用退换时限、缺少签收记录或无法确定是否使用时，不得作出确定的退换承诺。应说明缺失信息，必要时建议人工处理。不得套用数码商品规则或声称已经执行退款。",
+              "start_char": 0,
+              "end_char": 110
+            },
+            "score": 0.665329413431264
+          }
+        ]
+      }
+    },
+    {
+      "case": {
+        "id": "Q06",
+        "query": "配件超期签收记录缺失",
+        "category": "配件",
+        "as_of": "2026-11-02",
+        "expected_policy_id": "accessory-after-window",
+        "expected_version": "v1"
+      },
+      "lexical": {
+        "rank": 1,
+        "elapsed_ms": 0.83,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "accessory-after-window:v1:000",
+              "policy_id": "accessory-after-window",
+              "version": "v1",
+              "title": "配件超期与信息不足处理规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件超过适用退换时限、缺少签收记录或无法确定是否使用时，不得作出确定的退换承诺。应说明缺失信息，必要时建议人工处理。不得套用数码商品规则或声称已经执行退款。",
+              "start_char": 0,
+              "end_char": 110
+            },
+            "score": 7
+          },
+          {
+            "chunk": {
+              "chunk_id": "accessory-exchange:v1:000",
+              "policy_id": "accessory-exchange",
+              "version": "v1",
+              "title": "配件质量问题换货规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后15日内出现破损或与订单规格不符时，应确认订单商品、问题描述和签收时间，可以生成待确认的换货草稿。缺货与物流延误不等于已确认商品质量问题。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 118
+            },
+            "score": 2
+          },
+          {
+            "chunk": {
+              "chunk_id": "accessory-return:v1:000",
+              "policy_id": "accessory-return",
+              "version": "v1",
+              "title": "配件非质量退货规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后10日内且无使用痕迹、包装和配件齐全时，可以生成非质量退货草稿；已经使用或信息不明确时，先澄清具体情况。只适用于配件类商品，不适用于数码主商品。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 121
+            },
+            "score": 2
+          }
+        ]
+      },
+      "semantic": {
+        "rank": 1,
+        "elapsed_ms": 118.15,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "accessory-after-window:v1:000",
+              "policy_id": "accessory-after-window",
+              "version": "v1",
+              "title": "配件超期与信息不足处理规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件超过适用退换时限、缺少签收记录或无法确定是否使用时，不得作出确定的退换承诺。应说明缺失信息，必要时建议人工处理。不得套用数码商品规则或声称已经执行退款。",
+              "start_char": 0,
+              "end_char": 110
+            },
+            "score": 0.7403768592219295
+          },
+          {
+            "chunk": {
+              "chunk_id": "accessory-exchange:v1:000",
+              "policy_id": "accessory-exchange",
+              "version": "v1",
+              "title": "配件质量问题换货规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后15日内出现破损或与订单规格不符时，应确认订单商品、问题描述和签收时间，可以生成待确认的换货草稿。缺货与物流延误不等于已确认商品质量问题。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 118
+            },
+            "score": 0.6713320362161
+          },
+          {
+            "chunk": {
+              "chunk_id": "accessory-return:v1:000",
+              "policy_id": "accessory-return",
+              "version": "v1",
+              "title": "配件非质量退货规则",
+              "category": "配件",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】配件在签收后10日内且无使用痕迹、包装和配件齐全时，可以生成非质量退货草稿；已经使用或信息不明确时，先澄清具体情况。只适用于配件类商品，不适用于数码主商品。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 121
+            },
+            "score": 0.6492719804996951
+          }
+        ]
+      }
+    },
+    {
+      "case": {
+        "id": "Q07",
+        "query": "耳机质量问题换货",
+        "category": "数码",
+        "as_of": "2026-09-30",
+        "expected_policy_id": "digital-exchange",
+        "expected_version": "v1"
+      },
+      "lexical": {
+        "rank": 1,
+        "elapsed_ms": 0.85,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "digital-exchange:v1:000",
+              "policy_id": "digital-exchange",
+              "version": "v1",
+              "title": "数码质量问题换货旧规则",
+              "category": "数码",
+              "effective_from": "2026-01-01",
+              "effective_until": "2026-10-01",
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品签收后7日内出现质量问题，可以收集故障描述和商品信息后生成换货草稿；仅凭用户一句坏了不能声称质量问题已经核实。正式提交需要用户确认。本版本在2026年10月1日停止适用。",
+              "start_char": 0,
+              "end_char": 121
+            },
+            "score": 5
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-return:v1:000",
+              "policy_id": "digital-return",
+              "version": "v1",
+              "title": "数码商品非质量退货旧规则",
+              "category": "数码",
+              "effective_from": "2026-01-01",
+              "effective_until": "2026-10-01",
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品非质量问题退货：在签收后5日内提出，且商品未拆封、无使用痕迹、配件齐全时，可生成退货申请草稿。已拆封或缺少签收信息时不能直接确认资格。提交须经用户明确确认。本版本在2026年10月1日停止适用。",
+              "start_char": 0,
+              "end_char": 133
+            },
+            "score": 3
+          }
+        ]
+      },
+      "semantic": {
+        "rank": 1,
+        "elapsed_ms": 128.62,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "digital-exchange:v1:000",
+              "policy_id": "digital-exchange",
+              "version": "v1",
+              "title": "数码质量问题换货旧规则",
+              "category": "数码",
+              "effective_from": "2026-01-01",
+              "effective_until": "2026-10-01",
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品签收后7日内出现质量问题，可以收集故障描述和商品信息后生成换货草稿；仅凭用户一句坏了不能声称质量问题已经核实。正式提交需要用户确认。本版本在2026年10月1日停止适用。",
+              "start_char": 0,
+              "end_char": 121
+            },
+            "score": 0.6139873429846759
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-return:v1:000",
+              "policy_id": "digital-return",
+              "version": "v1",
+              "title": "数码商品非质量退货旧规则",
+              "category": "数码",
+              "effective_from": "2026-01-01",
+              "effective_until": "2026-10-01",
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品非质量问题退货：在签收后5日内提出，且商品未拆封、无使用痕迹、配件齐全时，可生成退货申请草稿。已拆封或缺少签收信息时不能直接确认资格。提交须经用户明确确认。本版本在2026年10月1日停止适用。",
+              "start_char": 0,
+              "end_char": 133
+            },
+            "score": 0.5030046789250305
+          }
+        ]
+      }
+    },
+    {
+      "case": {
+        "id": "Q08",
+        "query": "耳机质量问题换货",
+        "category": "数码",
+        "as_of": "2026-10-01",
+        "expected_policy_id": "digital-exchange",
+        "expected_version": "v2"
+      },
+      "lexical": {
+        "rank": 1,
+        "elapsed_ms": 1.23,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "digital-exchange:v2:000",
+              "policy_id": "digital-exchange",
+              "version": "v2",
+              "title": "数码质量问题换货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品签收后15日内出现质量问题，可以收集故障描述、目标商品和签收时间后生成换货草稿。例如耳机单侧无声应补充故障表现，不能虚构检测结果。超过时限不能直接承诺换货，应说明需要进一步处理。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 136
+            },
+            "score": 6
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-return:v2:000",
+              "policy_id": "digital-return",
+              "version": "v2",
+              "title": "数码商品非质量退货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品非质量问题退货：在签收后10日内提出，且商品未拆封、无使用痕迹、配件齐全时，可生成退货申请草稿。是否拆封、签收日期或配件情况不明时，应先询问；不符合条件不能承诺退货。提交须经用户明确确认。",
+              "start_char": 0,
+              "end_char": 130
+            },
+            "score": 3
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-after-window:v1:000",
+              "policy_id": "digital-after-window",
+              "version": "v1",
+              "title": "数码商品超期咨询规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品超出对应退换时限时，说明当前自助政策无法确认退换资格，可以整理问题并建议人工处理。不得自动批准换货、承诺维修周期或实际退款。其他类别政策不得作为数码商品处理依据。",
+              "start_char": 0,
+              "end_char": 117
+            },
+            "score": 2
+          }
+        ]
+      },
+      "semantic": {
+        "rank": 1,
+        "elapsed_ms": 135.77,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "digital-exchange:v2:000",
+              "policy_id": "digital-exchange",
+              "version": "v2",
+              "title": "数码质量问题换货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品签收后15日内出现质量问题，可以收集故障描述、目标商品和签收时间后生成换货草稿。例如耳机单侧无声应补充故障表现，不能虚构检测结果。超过时限不能直接承诺换货，应说明需要进一步处理。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 136
+            },
+            "score": 0.6502384734350904
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-after-window:v1:000",
+              "policy_id": "digital-after-window",
+              "version": "v1",
+              "title": "数码商品超期咨询规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品超出对应退换时限时，说明当前自助政策无法确认退换资格，可以整理问题并建议人工处理。不得自动批准换货、承诺维修周期或实际退款。其他类别政策不得作为数码商品处理依据。",
+              "start_char": 0,
+              "end_char": 117
+            },
+            "score": 0.5233903676553892
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-return:v2:000",
+              "policy_id": "digital-return",
+              "version": "v2",
+              "title": "数码商品非质量退货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品非质量问题退货：在签收后10日内提出，且商品未拆封、无使用痕迹、配件齐全时，可生成退货申请草稿。是否拆封、签收日期或配件情况不明时，应先询问；不符合条件不能承诺退货。提交须经用户明确确认。",
+              "start_char": 0,
+              "end_char": 130
+            },
+            "score": 0.4914453490617683
+          }
+        ]
+      }
+    },
+    {
+      "case": {
+        "id": "Q09",
+        "query": "左边听不见了想换一副",
+        "category": "数码",
+        "as_of": "2026-11-02",
+        "expected_policy_id": "digital-exchange",
+        "expected_version": "v2"
+      },
+      "lexical": {
+        "rank": null,
+        "elapsed_ms": 0.54,
+        "hits": []
+      },
+      "semantic": {
+        "rank": 1,
+        "elapsed_ms": 140.64,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "digital-exchange:v2:000",
+              "policy_id": "digital-exchange",
+              "version": "v2",
+              "title": "数码质量问题换货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品签收后15日内出现质量问题，可以收集故障描述、目标商品和签收时间后生成换货草稿。例如耳机单侧无声应补充故障表现，不能虚构检测结果。超过时限不能直接承诺换货，应说明需要进一步处理。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 136
+            },
+            "score": 0.31487794401506725
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-after-window:v1:000",
+              "policy_id": "digital-after-window",
+              "version": "v1",
+              "title": "数码商品超期咨询规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品超出对应退换时限时，说明当前自助政策无法确认退换资格，可以整理问题并建议人工处理。不得自动批准换货、承诺维修周期或实际退款。其他类别政策不得作为数码商品处理依据。",
+              "start_char": 0,
+              "end_char": 117
+            },
+            "score": 0.28344763613629076
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-return:v2:000",
+              "policy_id": "digital-return",
+              "version": "v2",
+              "title": "数码商品非质量退货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品非质量问题退货：在签收后10日内提出，且商品未拆封、无使用痕迹、配件齐全时，可生成退货申请草稿。是否拆封、签收日期或配件情况不明时，应先询问；不符合条件不能承诺退货。提交须经用户明确确认。",
+              "start_char": 0,
+              "end_char": 130
+            },
+            "score": 0.17310505277039812
+          }
+        ]
+      }
+    },
+    {
+      "case": {
+        "id": "Q10",
+        "query": "zzzzuniquenomatch",
+        "category": "数码",
+        "as_of": "2026-11-02",
+        "expected_policy_id": null,
+        "expected_version": null
+      },
+      "lexical": {
+        "rank": null,
+        "elapsed_ms": 0.52,
+        "hits": []
+      },
+      "semantic": {
+        "rank": null,
+        "elapsed_ms": 128.5,
+        "hits": [
+          {
+            "chunk": {
+              "chunk_id": "digital-after-window:v1:000",
+              "policy_id": "digital-after-window",
+              "version": "v1",
+              "title": "数码商品超期咨询规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品超出对应退换时限时，说明当前自助政策无法确认退换资格，可以整理问题并建议人工处理。不得自动批准换货、承诺维修周期或实际退款。其他类别政策不得作为数码商品处理依据。",
+              "start_char": 0,
+              "end_char": 117
+            },
+            "score": 0.31317526271102114
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-exchange:v2:000",
+              "policy_id": "digital-exchange",
+              "version": "v2",
+              "title": "数码质量问题换货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品签收后15日内出现质量问题，可以收集故障描述、目标商品和签收时间后生成换货草稿。例如耳机单侧无声应补充故障表现，不能虚构检测结果。超过时限不能直接承诺换货，应说明需要进一步处理。正式提交需要用户确认。",
+              "start_char": 0,
+              "end_char": 136
+            },
+            "score": 0.2881161217451317
+          },
+          {
+            "chunk": {
+              "chunk_id": "digital-return:v2:000",
+              "policy_id": "digital-return",
+              "version": "v2",
+              "title": "数码商品非质量退货规则",
+              "category": "数码",
+              "effective_from": "2026-10-01",
+              "effective_until": null,
+              "text": "【仅为 ShopCare 项目自编模拟政策，不代表真实商家规则】数码商品非质量问题退货：在签收后10日内提出，且商品未拆封、无使用痕迹、配件齐全时，可生成退货申请草稿。是否拆封、签收日期或配件情况不明时，应先询问；不符合条件不能承诺退货。提交须经用户明确确认。",
+              "start_char": 0,
+              "end_char": 130
+            },
+            "score": 0.2843755328614134
+          }
+        ]
+      }
+    }
+  ]
+}
