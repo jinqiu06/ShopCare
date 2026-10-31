@@ -1,0 +1,31 @@
+{
+  "started_at_utc": "2026-10-31T10:35:45.614198+00:00",
+  "demo_user_id": "U001",
+  "order_id": "O004",
+  "item_id": "O004-I01",
+  "query": "上海明天会下雨吗？",
+  "as_of": "2026-11-02",
+  "configured_chat_model": "qwen-plus",
+  "returned_chat_model": "qwen-plus",
+  "embedding_model": "text-embedding-v4",
+  "embedding_dimensions": 1024,
+  "elapsed_ms": 2985.74,
+  "answer": {
+    "status": "insufficient_evidence",
+    "answer": "您的问题‘上海明天会下雨吗？’属于天气预报咨询，与订单售后、商品退换或相关政策无关。ShopCare 售后助手仅提供基于订单事实和所附政策的售后咨询服务，无法提供天气信息。",
+    "citation_chunk_ids": [],
+    "limitations": [
+      "当前系统不支持天气查询类问题；所有提供的 evidence 均为数码商品售后政策，与天气无任何关联"
+    ]
+  },
+  "usage_metadata": {
+    "input_tokens": 942,
+    "output_tokens": 107,
+    "total_tokens": 1049,
+    "input_token_details": {
+      "cache_read": 0
+    },
+    "output_token_details": {}
+  },
+  "usage_note": "对话模型返回的 usage；空值表示不可用，不包含 embedding 用量。"
+}

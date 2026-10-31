@@ -173,3 +173,27 @@
 - 当前 HTTP 搜索仍为词法；语义检索服务已实现并完成真实对照。今日范围完成，模型回答作为下一次任务候选，届时先声明范围。
 
 - 今日最终离线回归：283 项测试通过，-W error 无警告；全后端 Ruff 检查和 51 个 Python 文件格式检查通过。仅补齐模型声明的尾逗号，保留统一多行格式。
+
+
+## 2026-10-31｜单次回答开发中：完整链路与首次真实试跑
+
+- 开发者完成 PolicyAnswer、build_chat_client、build_answer_messages、parse_policy_answer、generate_policy_answer、get_order_answer_context、answer_order_question。
+- 助手补充消息/回答测试与订单上下文/链路测试，当前相关 54 项离线测试通过，代码检查通过；原有完整测试数量不作为本轮结果。
+- 助手新增 scripts/answer_order.py 的 main，复用已有核心链路；默认只预览，--run 使用固定演示身份 U001，最多一次 embedding 和一次对话调用；不写数据库，可保存 JSON 报告。流程图已同步更新。
+- 真实试跑：O004 / O004-I01，参照日期 2026-11-02，text-embedding-v4 1024维 + qwen-plus。总耗时约 3593ms，对话 usage 输入854/输出132/总986（不包含 embedding 用量）。引用 digital-exchange:v2:000 格式和来源校验通过。
+- 内容验收未通过：模型承诺未来生成尚未实现的换货草稿，并将用户自述故障直接定性为质量问题。原始回答保存在 docs/answer-demo.json，不能将格式校验通过等同于业务回答正确。
+- 剩余：开发者收紧提示词的能力边界与事实/条件表达，复测后完成少量对照；不追加 Agent、记忆或真实售后写操作。
+
+- 修订提示词后复测三例：明确故障仍承诺草稿；模糊故障错误使用 answered 且日期推理矛盾；无关天气问题正确说明证据不足。内容验收仍未通过，停止追加付费重试。四次试跑总对话 usage 4376 tokens（不含 embedding），详见 docs/answer-baseline.md 和四份原始 JSON。
+
+- 第二次提示词修订后两例复测：澄清状态与能力边界改善；日期推理（包括 limitations）和无证据条件仍有错误，内容验收未最终通过。停止付费重试，下一步由开发者实现确定性签收日期差计算，并传入模型作为事实；六次试跑对话总用量7072 tokens，不含 embedding。
+
+
+### 10月31日收口记录
+
+- 开发者新增 get_days_since_delivery 并接入 build_answer_messages 的 days_since_delivery 字段；助手补充同日/跨月/闰年/跨年/未知日期及输入事实校验，流程图同步。
+- 最新“耳机坏了”单例真实回归通过：needs_clarification，未创建申请，limitations 正确使用签收后3天，无日期矛盾；3511.02ms，对话1337 tokens，不含 embedding。
+- 当前已跑通订单事实→政策检索→单次结构化回答，并有CLI、错误/引用离线验证与真实失败修复记录。本轮不再增加功能或付费重试。
+- 保留局限：最终提示词仅重测一个失败样例，未证明所有场景稳定；未接回答HTTP、Agent或记忆。JSON/引用来源校验不能验证全部语义。报告保存所有失败结果，不用最终单例宣称整体准确率。
+
+- 本次最终离线回归：326项测试通过，-W error 无警告，全后端 Ruff 检查通过；统一末尾换行后57个Python文件格式检查通过。

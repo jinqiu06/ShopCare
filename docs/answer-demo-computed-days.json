@@ -1,0 +1,32 @@
+{
+  "started_at_utc": "2026-10-31T10:45:46.462880+00:00",
+  "demo_user_id": "U001",
+  "order_id": "O004",
+  "item_id": "O004-I01",
+  "query": "耳机坏了",
+  "as_of": "2026-11-02",
+  "configured_chat_model": "qwen-plus",
+  "returned_chat_model": "qwen-plus",
+  "embedding_model": "text-embedding-v4",
+  "embedding_dimensions": 1024,
+  "elapsed_ms": 3511.02,
+  "answer": {
+    "status": "needs_clarification",
+    "answer": "耳机具体出现了什么故障，例如单侧无声、无法充电、连接异常或声音失真？\n目前仅提供政策咨询，尚未创建任何申请。",
+    "citation_chunk_ids": [],
+    "limitations": [
+      "用户未说明故障具体表现，无法判断是否属于‘质量问题’；政策要求需明确故障描述才能适用换货规则（digital-exchange:v2:000）",
+      "days_since_delivery=3，在15日质量换货窗口期内，但故障性质未确认，不能直接认定符合换货条件"
+    ]
+  },
+  "usage_metadata": {
+    "input_tokens": 1206,
+    "output_tokens": 131,
+    "total_tokens": 1337,
+    "input_token_details": {
+      "cache_read": 0
+    },
+    "output_token_details": {}
+  },
+  "usage_note": "对话模型返回的 usage；空值表示不可用，不包含 embedding 用量。"
+}

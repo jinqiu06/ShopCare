@@ -1,0 +1,33 @@
+{
+  "started_at_utc": "2026-10-31T10:35:29.398835+00:00",
+  "demo_user_id": "U001",
+  "order_id": "O004",
+  "item_id": "O004-I01",
+  "query": "耳机左边没有声音，能申请换货吗？",
+  "as_of": "2026-11-02",
+  "configured_chat_model": "qwen-plus",
+  "returned_chat_model": "qwen-plus",
+  "embedding_model": "text-embedding-v4",
+  "embedding_dimensions": 1024,
+  "elapsed_ms": 4889.68,
+  "answer": {
+    "status": "answered",
+    "answer": "您的订单于2026年10月30日签收，当前日期为2026年11月02日，仍在签收后15日内，符合数码商品质量问题换货的时间要求。您描述的‘耳机左边没有声音’属于典型单侧无声故障，符合《数码质量问题换货规则》中列举的可受理情形。我们将为您生成换货草稿，但需您后续确认提交；请注意，正式换货需以您确认申请为准，且不包含虚构或未经核实的检测结果。",
+    "citation_chunk_ids": [
+      "digital-exchange:v2:000"
+    ],
+    "limitations": [
+      "尚未确认耳机是否已拆封、配件是否齐全、是否存在人为损坏等影响换货资格的因素；本次仅说明政策适用性，未实际创建换货申请。"
+    ]
+  },
+  "usage_metadata": {
+    "input_tokens": 947,
+    "output_tokens": 191,
+    "total_tokens": 1138,
+    "input_token_details": {
+      "cache_read": 0
+    },
+    "output_token_details": {}
+  },
+  "usage_note": "对话模型返回的 usage；空值表示不可用，不包含 embedding 用量。"
+}

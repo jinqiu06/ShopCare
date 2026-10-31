@@ -1,0 +1,35 @@
+{
+  "started_at_utc": "2026-10-31T10:37:42.003527+00:00",
+  "demo_user_id": "U001",
+  "order_id": "O004",
+  "item_id": "O004-I01",
+  "query": "耳机左边没有声音，能申请换货吗？",
+  "as_of": "2026-11-02",
+  "configured_chat_model": "qwen-plus",
+  "returned_chat_model": "qwen-plus",
+  "embedding_model": "text-embedding-v4",
+  "embedding_dimensions": 1024,
+  "elapsed_ms": 6413.08,
+  "answer": {
+    "status": "answered",
+    "answer": "根据当前模拟政策，您购买的无线耳机在签收后15日内出现质量问题（如单侧无声），可申请换货。订单于2026-10-26创建，2026-10-30完成签收，截至咨询日2026-11-02，仍在15日质量换货期内（即最晚可至2026-11-14）。您已说明‘左边没有声音’，属于政策示例中明确提及的故障表现，符合‘收集故障描述’要求。但需注意：本系统仅提供政策解释与草稿生成指引，不执行实际换货操作；正式换货申请需后续由您确认提交。",
+    "citation_chunk_ids": [
+      "digital-exchange:v2:000"
+    ],
+    "limitations": [
+      "未核实耳机是否已拆封、配件是否齐全（虽不影响质量换货，但可能影响其他流程判断）",
+      "未进行实物检测，‘单侧无声’为用户自述，不等同于官方质量认定",
+      "不承诺换货审批结果，最终以人工审核或检测结论为准"
+    ]
+  },
+  "usage_metadata": {
+    "input_tokens": 1136,
+    "output_tokens": 262,
+    "total_tokens": 1398,
+    "input_token_details": {
+      "cache_read": 0
+    },
+    "output_token_details": {}
+  },
+  "usage_note": "对话模型返回的 usage；空值表示不可用，不包含 embedding 用量。"
+}

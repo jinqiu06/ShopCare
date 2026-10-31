@@ -99,3 +99,168 @@ def test_order_list_pagination(session, user_id, limit, offset, expected_ids):
 def test_order_list_pagination_rejects_invalid_range(session, limit, offset):
     with pytest.raises(ValueError):
         list_orders_for_user(session, "U001", limit=limit, offset=offset)
+
+
+@pytest.mark.parametrize("item_id", ["O001-I01", "O001-I02"])
+def test_answer_context_selects_requested_item(session, item_id):
+    from shopcare.services.order_answers import get_order_answer_context
+
+    order, item = get_order_answer_context(session, "U001", "O001", item_id)
+    assert order.id == "O001"
+    assert item.id == item_id
+    assert item.category in ("数码", "配件")
+    assert "user_id" not in order.model_dump()
+    assert order.model_dump(mode="json")["created_at"]
+
+
+@pytest.mark.parametrize(
+    "user_id,order_id",
+    [
+        ("U002", "O001"),
+        ("U001", "missing"),
+        ("unknown", "O001"),
+    ],
+)
+def test_answer_context_inaccessible_order_has_same_error(session, user_id, order_id):
+    from unittest.mock import patch
+
+    from shopcare.services.order_answers import get_order_answer_context
+
+    with patch("shopcare.services.order_answers.get_order_items_for_user") as read_items:
+        with pytest.raises(LookupError, match="^订单不存在或不可访问$"):
+            get_order_answer_context(session, user_id, order_id, "O001-I01")
+        read_items.assert_not_called()
+
+
+@pytest.mark.parametrize("item_id", ["missing", "O002-I01"])
+def test_answer_context_rejects_item_from_other_order(session, item_id):
+    from shopcare.services.order_answers import get_order_answer_context
+
+    with pytest.raises(LookupError, match="^指定商品不在该订单中$"):
+        get_order_answer_context(session, "U001", "O001", item_id)
+
+
+def test_answer_context_empty_order_items_raise(session):
+    from sqlalchemy import delete
+
+    from shopcare.services.order_answers import get_order_answer_context
+
+    session.execute(delete(OrderItem).where(OrderItem.order_id == "O001"))
+    with pytest.raises(LookupError, match="^指定商品不在该订单中$"):
+        get_order_answer_context(session, "U001", "O001", "O001-I01")
+
+
+@pytest.fixture
+def answer_clients(session):
+    import json
+    from datetime import date
+    from unittest.mock import Mock
+
+    from langchain_core.messages import AIMessage
+
+    from shopcare.db.models import PolicyChunkRecord, PolicyEmbeddingRecord
+
+    for category, name in [("数码", "digital"), ("配件", "accessory")]:
+        session.add(
+            PolicyChunkRecord(
+                chunk_id=name,
+                policy_id=name,
+                version="v1",
+                title="模拟换货",
+                category=category,
+                effective_from=date(2026, 1, 1),
+                text="模拟政策",
+                start_char=0,
+                end_char=4,
+            )
+        )
+    session.flush()
+    for name in ["digital", "accessory"]:
+        session.add(
+            PolicyEmbeddingRecord(
+                chunk_id=name,
+                model_id="test-model",
+                dimensions=2,
+                vector=[1.0, 0.0],
+            )
+        )
+    session.flush()
+    embedding, chat = Mock(), Mock()
+    embedding.model, embedding.dimensions = "test-model", 2
+    embedding.embed_query.return_value = [1.0, 0.0]
+
+    def reply(messages):
+        data = json.loads(messages[1].content)
+        return AIMessage(
+            content=json.dumps(
+                {
+                    "status": "answered",
+                    "answer": "请按模拟政策核实故障。",
+                    "citation_chunk_ids": [data["evidence"][0]["chunk_id"]],
+                    "limitations": ["尚未核实故障"],
+                }
+            ),
+            usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+        )
+
+    chat.invoke.side_effect = reply
+    return embedding, chat
+
+
+@pytest.mark.parametrize("item_id,expected", [("O004-I01", "digital"), ("O004-I02", "accessory")])
+def test_answer_pipeline_uses_selected_category_and_real_core(
+    session, answer_clients, item_id, expected
+):
+    import json
+    from datetime import date
+
+    from shopcare.services.order_answers import answer_order_question
+
+    embedding, chat = answer_clients
+    answer, raw = answer_order_question(
+        session, embedding, chat, "U001", "O004", item_id, "可以换货吗", date(2026, 11, 2)
+    )
+    assert answer.citation_chunk_ids == [expected]
+    assert raw.usage_metadata["total_tokens"] == 15
+    embedding.embed_query.assert_called_once()
+    chat.invoke.assert_called_once()
+    data = json.loads(chat.invoke.call_args.args[0][1].content)
+    assert [item["id"] for item in data["items"]] == [item_id]
+
+
+@pytest.mark.parametrize(
+    "user,order,item,query,error",
+    [
+        ("U002", "O004", "O004-I01", "换货", LookupError),
+        ("U001", "missing", "missing", "换货", LookupError),
+        ("U001", "O004", "O001-I01", "换货", LookupError),
+        ("U001", "O004", "O004-I01", "  ", ValueError),
+    ],
+)
+def test_answer_pipeline_invalid_request_never_calls_models(
+    session, user, order, item, query, error
+):
+    from datetime import date
+    from unittest.mock import Mock
+
+    from shopcare.services.order_answers import answer_order_question
+
+    embedding, chat = Mock(), Mock()
+    with pytest.raises(error):
+        answer_order_question(session, embedding, chat, user, order, item, query, date(2026, 11, 2))
+    embedding.embed_query.assert_not_called()
+    chat.invoke.assert_not_called()
+
+
+def test_answer_pipeline_embedding_failure_prevents_chat(session, answer_clients):
+    from datetime import date
+
+    from shopcare.services.order_answers import answer_order_question
+
+    embedding, chat = answer_clients
+    embedding.embed_query.side_effect = TimeoutError("simulated timeout")
+    with pytest.raises(TimeoutError):
+        answer_order_question(
+            session, embedding, chat, "U001", "O004", "O004-I01", "换货", date(2026, 11, 2)
+        )
+    chat.invoke.assert_not_called()

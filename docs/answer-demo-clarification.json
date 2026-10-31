@@ -1,0 +1,34 @@
+{
+  "started_at_utc": "2026-10-31T10:35:36.744562+00:00",
+  "demo_user_id": "U001",
+  "order_id": "O004",
+  "item_id": "O004-I01",
+  "query": "耳机坏了",
+  "as_of": "2026-11-02",
+  "configured_chat_model": "qwen-plus",
+  "returned_chat_model": "qwen-plus",
+  "embedding_model": "text-embedding-v4",
+  "embedding_dimensions": 1024,
+  "elapsed_ms": 6507.17,
+  "answer": {
+    "status": "answered",
+    "answer": "您的订单 O004 于 2026-10-30T12:00:00 签收，当前日期为 2026-11-02，已超过数码商品质量问题换货的 15 日时限（截至 2026-11-14 前才属有效期内），但尚未超出该政策覆盖范围——您仍在 15 日内（10月30日签收，第15日为11月13日），因此符合‘数码质量问题换货规则’适用条件。请补充耳机的具体故障表现（例如：完全无声音、单侧无声、连接不稳定、无法充电等），以便我们为您生成换货草稿。注意：本环节仅生成草稿，正式提交需您后续确认。",
+    "citation_chunk_ids": [
+      "digital-exchange:v2:000"
+    ],
+    "limitations": [
+      "尚未核实耳机是否确属质量问题（用户自述‘坏了’未明确故障现象）",
+      "未确认商品是否仍保留原包装、配件及使用痕迹，此不影响当前换货资格判断，但可能影响后续审核"
+    ]
+  },
+  "usage_metadata": {
+    "input_tokens": 938,
+    "output_tokens": 265,
+    "total_tokens": 1203,
+    "input_token_details": {
+      "cache_read": 0
+    },
+    "output_token_details": {}
+  },
+  "usage_note": "对话模型返回的 usage；空值表示不可用，不包含 embedding 用量。"
+}

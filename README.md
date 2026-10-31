@@ -179,3 +179,22 @@ backend/
 2026-10-30 十个固定开发案例中，九个正例的 Hit@1/Hit@3：词法均为 8/9，语义均为 9/9；一个无关问题的正确空返回：词法 1/1，语义 0/1。口语换货问题得到改善，但没有相关性阈值的语义检索仍会向无关问题返回候选。本组小样本不是独立保留集，不代表真实业务准确率；本轮没有据此调阈值或添加混合检索。
 
 详见 [对照报告](docs/retrieval-comparison.md) 和 [逐题结果](docs/retrieval-comparison.json)。报告记录模型、维度、案例/索引指纹、候选与分数、单次耗时及调用数；两种分数不能直接比较，单次耗时也不是性能基准。网络错误会终止评测，不作为未命中计入统计。
+
+
+## 项目结构与调用流程
+
+见 [结构、运行方式与持续更新的函数流程图](docs/architecture-flow.md)。文档区分现有 HTTP 入口、数据准备命令与开发中的单次回答流程；新增函数时同步维护。
+
+
+## 单次订单咨询演示（开发中）
+
+```powershell
+.venv/Scripts/python -m shopcare.scripts.answer_order
+.venv/Scripts/python -m shopcare.scripts.answer_order --run --output docs/answer-demo.json
+```
+
+默认预览检查固定演示用户 U001 的订单与目标商品，不调用模型；--run 最多调用一次问题 embedding 和一次对话模型，不修改数据库。默认订单 O004、商品 O004-I01，参照日期为模拟日期 2026-11-02；可用 --order-id、--item-id、--query、--as-of 调整。尚无回答 HTTP 接口。
+
+首次真实试跑见 docs/answer-demo.json：格式和引用检查通过，但回答存在对尚未实现的草稿功能作承诺、故障定性过强的问题，内容验收仍在修正中。usage 为对话模型报告值，缺失时记为不可用，不包含 embedding 用量。详见 [流程图](docs/architecture-flow.md)。
+
+单次回答最新进展：已由业务代码计算签收后天数并加入模型输入；模糊故障的单例回归正确澄清且无日期矛盾。原始失败与修订结果见 [回答试跑记录](docs/answer-baseline.md)。最终版本未重新验证所有真实案例，不能据单例声明回答可靠性；当前仍为固定流程咨询，不执行申请。
