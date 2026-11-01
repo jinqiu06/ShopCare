@@ -1,12 +1,12 @@
 # ShopCare 结构与运行流程
 
-核对日期：2026-10-31。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
+核对日期：2026-11-01。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
 
 ## 当前状态
 
 - 已运行验证：订单 API、词法检索 API、政策导入、向量构建、语义检索和十题真实对照。
-- 本轮开发中：单次政策回答。消息构造、引用校验和生成函数已做离线验证；完整订单咨询入口通过离线链路验证，并完成一次真实试跑；试跑发现未来动作承诺和故障定性问题，提示词待修正复验。
-- HTTP 搜索仍调用词法检索，已有 answer_order CLI，尚无回答 HTTP 路由。启动 FastAPI 不会自动运行回答函数。
+- 单次回答CLI与HTTP入口均已接入并做离线验证。此前CLI真实试跑发现能力承诺和日期问题，最终日期修复仅做一个真实样例回归；本次未新增真实模型HTTP验证。
+- HTTP 搜索仍调用词法检索，已有 answer_order CLI 与 POST /api/orders/{order_id}/answer 回答路由。启动 FastAPI 不会自动运行回答函数。
 - LangGraph 工具循环、会话记忆、售后申请尚未实现。
 
 ## 目录职责
@@ -155,7 +155,7 @@ Set-Location D:\VsCode\ShopCare
 .venv\Scripts\python.exe -m uvicorn shopcare.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-正式 build_policy_index 调用真实 embedding，产生用量。已有索引不需要随 API 启动重建。浏览器访问 http://127.0.0.1:8000/docs 查看实际路由；http://127.0.0.1:8000/api/health 检查服务。政策搜索仍是词法；回答服务通过独立 answer_order CLI 调用，尚无 HTTP 入口；启动 API 不自动调用回答服务。
+正式 build_policy_index 调用真实 embedding，产生用量。已有索引不需要随 API 启动重建。浏览器访问 http://127.0.0.1:8000/docs 查看实际路由；http://127.0.0.1:8000/api/health 检查服务。政策搜索仍是词法；回答服务可通过独立 answer_order CLI 或 POST /api/orders/{order_id}/answer 调用；启动 API 不自动调用回答服务。
 
 评测另开终端，无需先启动 uvicorn：
 
@@ -176,7 +176,8 @@ Set-Location D:\VsCode\ShopCare
 | api/dependencies.py | `get_session`, `get_current_user_id` |
 | api/errors.py | `http_error_handler`, `validation_error_handler` |
 | api/health.py | `get_status` |
-| api/orders.py | `read_orders`, `read_order`, `read_order_items` |
+| api/orders.py | `read_orders`, `read_order`, `read_order_items`, `answer_order` |
+| schemas/answers.py | `OrderAnswerRequest.reject_blank` |
 | api/policies.py | `search_policies` |
 | db/session.py | `build_engine`, `init_db`, `enable_foreign_keys` |
 | main.py | `lifespan` |
@@ -245,3 +246,45 @@ flowchart TD
 此函数不判断换货资格，也不把15日解释为具体截止时刻；已由 build_answer_messages 调用，作为 days_since_delivery 字段加入模型输入。对应现有 test_answer_generation.py 验证同日、跨月、闰年、跨年、未知签收和非法参照日期。未调用模型。
 
 当前验收更新：日期事实已接入消息，最新“耳机坏了”一次真实复测正确澄清并引用3天事实，无日期矛盾；未复跑其余旧样例，不能宣称整个当前版本真实案例全部通过。原始失败与修订结果均保留。
+
+## 2026-11-01｜回答请求模型（尚未接入 HTTP）
+
+开发者新增 schemas/answers.py 的 OrderAnswerRequest 与 reject_blank 校验函数：对 item_id、query 去除首尾空白并拒绝空白值，字段声明限制长度，as_of 解析为日期，拒绝额外字段。仅进行请求数据校验，不调用核心服务、数据库或模型；尚未接入路由，不计为可用 HTTP 入口。
+
+源码函数清单补充：schemas/answers.py — OrderAnswerRequest.reject_blank。已本地验证正常输入、空白问题、空白商品、非法日期、超长问题和额外身份字段；未调用外部模型。
+
+## 2026-11-01｜回答 HTTP 成功路径（异常转换待实现）
+
+```mermaid
+flowchart TD
+    HTTP["POST /api/orders/{order_id}/answer"] --> INPUT["OrderAnswerRequest：字段和空白校验"]
+    INPUT --> DEPS["get_session + get_current_user_id：服务端演示身份"]
+    DEPS --> CLIENTS["Settings + build_embedding_client + build_chat_client"]
+    CLIENTS --> ANSWER["answer_order_question：归属检查 → 语义检索 → 单次回答"]
+    ANSWER --> OUTPUT["仅返回 PolicyAnswer，不暴露 AIMessage"]
+```
+
+开发者新增源码函数 api/orders.py 的 answer_order，接在 HTTP 入口与现有 answer_order_question 之间，已由 orders_router 接入应用。当前仅成功路径完成；LookupError、配置/索引/输出校验错误及模型服务错误尚未转换为统一 HTTP 错误，暂未完成接口验收。身份仍为固定演示身份，不是真实认证。
+
+助手复用 test_order_api.py 的 client fixture，新增 test_answer_api_forwards_trusted_identity_and_returns_only_answer 与 test_answer_api_rejects_invalid_body_before_clients：验证服务端身份传递、参数去空白、仅返回结构化回答、五种非法输入在构造客户端前拒绝。模拟客户端及核心返回，不调用真实模型；不据此宣称底层越权路径已完成 HTTP 验证。订单 API 文件共37项测试通过，-W error 无警告。初次运行遭遇旧测试缓存/临时目录访问限制，改用独立临时目录并关闭缓存后通过。
+
+### 回答接口 404 验证更新
+
+开发者已在 answer_order 将 LookupError 转为统一 404（ORDER_CONTEXT_NOT_FOUND）；主调用图不变。新增测试函数 test_answer_api_missing_unowned_and_wrong_item_return_safe_404：保留真实 answer_order_question 与归属/商品检查，仅替换外部客户端，覆盖订单不存在、他人订单、商品不属于订单。三例均返回相同错误，且 embedding.embed_query 与 chat.invoke 未调用。订单 API 共40项测试通过，-W error 无警告，相关代码及格式检查通过。客户端构造仍在 try 外，配置、索引和模型异常转换待实现；尚未完成整体接口验收。
+
+### 回答接口上游异常验证更新
+
+开发者在 answer_order 按顺序捕获 APITimeoutError/TimeoutError 和 OpenAIError，分别返回504 ANSWER_TIMEOUT与502 ANSWER_UPSTREAM_ERROR，采用固定对外提示。新增测试函数 test_answer_api_converts_provider_errors_without_leaking_details，模拟三种异常，验证状态、错误结构、不泄漏内部细节、不重试；不调用真实模型。订单 API 共43项测试通过，-W error 无警告。调用图不变，配置构造仍在 try 外，索引/模型输出等 ValueError 尚未处理，整体接口验收仍待完成。
+
+### 回答接口配置错误验证更新
+
+开发者将 Settings、embedding/chat 客户端构造置于独立 try，捕获 ValueError 返回503 ANSWER_NOT_CONFIGURED，不与回答阶段校验错误混淆。新增测试函数 test_answer_api_configuration_failure_stops_before_pipeline，模拟三个配置阶段失败，验证固定错误响应、不泄漏细节、停止后续构造和回答流程。订单 API 共46项测试通过，-W error 无警告，相关代码与格式检查通过，无真实模型调用。主调用顺序不变，回答阶段 ValueError 和数据库异常仍待处理，整体接口尚未验收完成。
+
+
+## 2026-11-01｜回答 HTTP 离线验收完成
+
+调用路径：HTTP → OrderAnswerRequest → 服务端身份/Session → 配置和客户端构造 → answer_order_question → PolicyAnswer。配置阶段ValueError转503；回答阶段LookupError转404、超时转504、OpenAIError转502、ValueError/SQLAlchemyError转500，均采用固定公开错误。配置构造优先于归属检查；日期早于签收日仍是通用500，后续可细化。历史小步记录中的待实现异常分支现已完成。
+
+新增测试函数 test_answer_api_database_failure_is_safe_error 与 test_answer_api_real_pipeline_with_simulated_models：验证数据库异常，以及保留真实HTTP、订单事实、检索、消息构造和引用校验的正常回答/非法JSON/伪造引用/缺失索引。仅替换外部模型客户端，使用临时数据库；缺失索引不调用模型。运行函数无新增，主调用图不变。
+
+最终离线回归346项通过，-W error 无警告；全后端Ruff与格式检查结果见当日进度。未新增真实付费调用，不把离线通过等同于语义正确或真实模型稳定；仍无Agent、记忆或售后写操作。

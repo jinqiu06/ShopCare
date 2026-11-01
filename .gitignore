@@ -21,3 +21,6 @@ data/private/
 *.sqlite
 *.sqlite3
 *.sqlite-*
+
+# Local test temporary directories
+.test-tmp*/
