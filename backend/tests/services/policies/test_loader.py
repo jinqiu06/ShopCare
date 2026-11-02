@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from shopcare.schemas.policy_models import PolicyDocument
-from shopcare.services.policy_loader import load_policies, load_policy
+from shopcare.services.policies.loader import load_policies, load_policy
 
 
 def policy_data(**overrides):
@@ -29,7 +29,7 @@ def write_policy(path, **overrides):
 
 
 def test_load_repository_samples():
-    directory = Path(__file__).resolve().parents[3] / "data" / "policies"
+    directory = Path(__file__).resolve().parents[4] / "data" / "policies"
     policies = load_policies(directory)
     assert len(policies) == 8
     assert len({(p.policy_id, p.version) for p in policies}) == 8

@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 
 from shopcare.db import build_engine, init_db
 from shopcare.main import app, settings
-from shopcare.services.policy_chunker import split_policy
-from shopcare.services.policy_loader import load_policies
-from shopcare.services.policy_store import replace_policy_chunks
+from shopcare.services.policies.chunker import split_policy
+from shopcare.services.policies.loader import load_policies
+from shopcare.services.policies.store import replace_policy_chunks
 
 
 @pytest.fixture

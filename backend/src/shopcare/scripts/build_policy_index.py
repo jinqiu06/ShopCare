@@ -15,7 +15,7 @@ from shopcare.core.config import Settings
 from shopcare.db import build_engine, init_db
 from shopcare.db.models import PolicyChunkRecord
 from shopcare.services.embeddings import build_embedding_client
-from shopcare.services.policy_embeddings import embed_policy_chunks, save_policy_embeddings
+from shopcare.services.policies.embeddings import embed_policy_chunks, save_policy_embeddings
 
 
 def main(argv: list[str] | None = None) -> int:

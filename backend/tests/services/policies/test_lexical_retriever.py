@@ -6,15 +6,15 @@ from sqlalchemy.orm import Session
 
 from shopcare.db import build_engine, init_db
 from shopcare.db.models import PolicyChunkRecord
-from shopcare.services.policy_chunker import split_policy
-from shopcare.services.policy_loader import load_policies
-from shopcare.services.policy_retriever import (
+from shopcare.services.policies.chunker import split_policy
+from shopcare.services.policies.lexical_retriever import (
     list_effective_chunks,
     score_chunk,
     search_policy_chunks,
     tokenize_query,
 )
-from shopcare.services.policy_store import replace_policy_chunks
+from shopcare.services.policies.loader import load_policies
+from shopcare.services.policies.store import replace_policy_chunks
 
 
 @pytest.fixture
@@ -79,7 +79,7 @@ def test_sql_open_ended_policy_still_checks_start(engine, as_of, expected):
 
 @pytest.mark.parametrize("category,expected", [("数码", 3), ("配件", 3), ("unknown", 0)])
 def test_sql_candidates_from_all_sample_versions(engine, category, expected):
-    policies = load_policies(Path(__file__).resolve().parents[3] / "data/policies")
+    policies = load_policies(Path(__file__).resolve().parents[4] / "data/policies")
     with Session(engine) as session, session.begin():
         for policy in policies:
             replace_policy_chunks(session, policy, split_policy(policy))
@@ -220,7 +220,7 @@ def test_search_results_survive_session_close(engine):
 
 
 def test_search_real_sample_exchange_evidence(engine):
-    policies = load_policies(Path(__file__).resolve().parents[3] / "data/policies")
+    policies = load_policies(Path(__file__).resolve().parents[4] / "data/policies")
     with Session(engine) as session, session.begin():
         for policy in policies:
             replace_policy_chunks(session, policy, split_policy(policy))

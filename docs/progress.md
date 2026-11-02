@@ -236,3 +236,11 @@
 - 验证订单正常/越权/不存在、可信上下文不可覆盖、框架校验与执行内部错误分离；政策工具完整订单归属到语义检索、两个商品类别、空白输入、正常空结果、公开证据序列化、索引/超时/服务/数据库失败。
 - 边界：尚未接Agent、HTTP工具入口或ToolCall/ToolMessage协议；Session由外层管理，数据库故障需外层结束或恢复事务；检索失败尚未细分重试策略；昨天澄清回答中的无引用政策解释仍为后续改进项。
 - 当天约定工具范围完成。下一阶段候选为有界模型工具循环，届时先讲状态、预算及失败终止，再由开发者实现。按持续授权执行本轮GitHub提交推送，结果以实际推送核验为准。
+
+### 11月2日追加：按政策领域整理服务目录
+
+- 用户在工具阶段验收后明确追加目录重组任务。助手将七个政策服务移到services/policies/：policy_loader→loader、policy_filter→filter、policy_chunker→chunker、policy_store→store、policy_embeddings→embeddings、policy_retriever→lexical_retriever、semantic_retriever同名移入。对应七个测试移到backend/tests/services/policies/并同步简化文件名。
+- 仅新增services/policies/__init__.py声明包，不定义函数、不调用核心服务。其余为已有文件移动、API/工具/CLI/业务层/测试导入更新；不新增算法、业务函数或依赖。七个迁移服务的全部函数/类语法树与移动前一致。
+- 首轮回归10项失败，原因是三个测试文件依赖原目录深度查找data/policies；修正文件位置向上一级的路径后，最终384项全部通过，-W error无警告，Ruff通过、62个Python文件格式检查通过。未新增真实模型调用、未改演示库。
+- README同步实际目录树，architecture-flow补模块输入/输出、两条流程、职责边界和新路径函数清单；policy-data/policy-storage更新路径。旧模块导入不再保留兼容入口，自定义外部代码若使用旧路径需更新；HTTP路径、CLI命令、函数名与数据格式保持原样。
+- 本次目录整理完成，按持续授权独立提交推送。

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from shopcare.db import build_engine, init_db
 from shopcare.db.models import PolicyChunkRecord, PolicyEmbeddingRecord
-from shopcare.services.semantic_retriever import search_semantic_policy_chunks
+from shopcare.services.policies.semantic_retriever import search_semantic_policy_chunks
 from shopcare.tools.policy import build_policy_tools
 
 AS_OF = date(2026, 10, 30)

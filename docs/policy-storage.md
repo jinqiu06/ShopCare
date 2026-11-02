@@ -25,7 +25,7 @@
 
 仅按 chunk_id 跳过已存在记录，不足以处理修改 chunk_size 后的重新切分：如果新片段数量减少，旧尾部会残留。因此第一版按一个政策版本整体替换，不做按行跳过。
 
-建议在 services/policy_store.py 实现：
+建议在 services/policies/store.py 实现：
 
 replace_policy_chunks(session, policy, chunks) -> int
 

@@ -18,9 +18,9 @@ from shopcare.core.config import Settings
 from shopcare.db import build_engine
 from shopcare.db.models import PolicyChunkRecord, PolicyEmbeddingRecord
 from shopcare.services.embeddings import build_embedding_client
-from shopcare.services.policy_embeddings import load_policy_embeddings
-from shopcare.services.policy_retriever import list_effective_chunks, search_policy_chunks
-from shopcare.services.semantic_retriever import search_semantic_policy_chunks
+from shopcare.services.policies.embeddings import load_policy_embeddings
+from shopcare.services.policies.lexical_retriever import list_effective_chunks, search_policy_chunks
+from shopcare.services.policies.semantic_retriever import search_semantic_policy_chunks
 
 
 def main(argv: list[str] | None = None) -> int:

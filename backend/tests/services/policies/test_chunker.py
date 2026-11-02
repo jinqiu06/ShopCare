@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from shopcare.schemas.policy_models import PolicyDocument
-from shopcare.services.policy_chunker import split_policy
+from shopcare.services.policies.chunker import split_policy
 
 
 def make_policy(content="ABCDEFGHI", **overrides):

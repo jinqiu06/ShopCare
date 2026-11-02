@@ -82,7 +82,8 @@ backend/
 │   ├── main.py               # 应用组装、生命周期与路由注册
 │   ├── api/
 │   │   ├── health.py         # 健康路由
-│   │   ├── orders.py         # 订单路由与 HTTP 参数
+│   │   ├── orders.py         # 订单查询与回答 HTTP 参数
+│   │   ├── policies.py       # 词法检索 HTTP 路由
 │   │   ├── dependencies.py   # 请求级 Session、演示身份
 │   │   └── errors.py         # HTTP 错误响应
 │   ├── core/config.py        # 环境配置
@@ -91,13 +92,28 @@ backend/
 │   │   ├── session.py        # Engine、外键配置、显式建表
 │   │   └── models.py         # 用户、订单、商品项
 │   ├── schemas/              # orders.py 响应模型、policy_models.py 政策格式
-│   ├── services/             # orders.py 查询逻辑、policy_loader.py 政策读取
-│   └── scripts/seed.py       # 模拟数据与初始化命令
+│   ├── services/
+│   │   ├── orders.py         # 订单业务查询
+│   │   ├── order_answers.py  # 订单 → 检索 → 回答的固定编排
+│   │   ├── answer_generation.py # 消息构造、回答与引用校验
+│   │   ├── embeddings.py     # embedding 客户端与余弦计算
+│   │   ├── llm.py            # 对话模型客户端
+│   │   └── policies/        # 政策领域
+│   │       ├── loader.py    # 读取、校验政策
+│   │       ├── filter.py    # 内存政策类别/日期过滤
+│   │       ├── chunker.py   # 原文切分
+│   │       ├── store.py     # 片段入库
+│   │       ├── embeddings.py # 政策向量生成、保存与读取
+│   │       ├── lexical_retriever.py # 候选查询与词法检索
+│   │       └── semantic_retriever.py # 语义检索
+│   ├── tools/               # orders.py、policy.py、executor.py：工具适配和派发
+│   └── scripts/             # 初始化、政策导入、索引构建、评测与演示命令
 └── tests/
     ├── api/                  # 健康检查、接口与错误
     ├── core/                 # 配置
     ├── db/                   # 数据约束、回滚与初始化
-    └── services/             # 用户隔离、商品项和分页
+    └── services/             # 订单、回答、客户端与命令验证
+        └── policies/         # 政策加载、切分、存储、向量与检索验证
 ```
 
 业务服务接收调用者管理的 Session，不自行提交事务；API 决定 HTTP 响应，schema 决定公开字段。应用启动创建 Engine，按请求创建 Session，关闭时释放资源；启动不自动建表或重置数据。
@@ -266,3 +282,6 @@ execute_tool先查工具名称，再单独校验输入，最后invoke。成功�
 工具不管理外层事务，不自行commit/rollback/close。数据库错误返回后，执行方仍需按事务状态结束或恢复Session，不能盲目继续复用。RETRIEVAL_UNAVAILABLE不承诺故障一定短暂：索引缺失或模型维度不匹配需要修复，不应无限重试。execute_tool不把工具内部所有异常伪装成输入错误，意外执行异常留给后续执行层处理。
 
 本轮384项离线测试通过，未新增真实模型调用；政策工具正常检索可能调用一次问题embedding，不调用对话模型，不写数据库。尚未验证真实模型选工具或Agent循环。
+
+
+目录整理（2026-11-02）：政策服务统一放在 `services/policies/`，对应测试位于 `backend/tests/services/policies/`。旧的 `shopcare.services.policy_*` 导入已更新为 `shopcare.services.policies.*`，不保留旧路径转发模块。HTTP接口、CLI命令、数据格式和函数名不变；自定义本地代码若使用旧导入，需同步更新。模块输入输出和两条处理流程见 `docs/architecture-flow.md`。

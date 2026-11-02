@@ -11,7 +11,7 @@ from shopcare.services.orders import (
     get_order_for_user,
     get_order_items_for_user,
 )
-from shopcare.services.semantic_retriever import search_semantic_policy_chunks
+from shopcare.services.policies.semantic_retriever import search_semantic_policy_chunks
 
 
 def get_order_answer_context(

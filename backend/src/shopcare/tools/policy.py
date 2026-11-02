@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from shopcare.schemas.policy_models import OrderPolicySearchInput
 from shopcare.services.order_answers import get_order_answer_context
-from shopcare.services.semantic_retriever import search_semantic_policy_chunks
+from shopcare.services.policies.semantic_retriever import search_semantic_policy_chunks
 
 
 def build_policy_tools(

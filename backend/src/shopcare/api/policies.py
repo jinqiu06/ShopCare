@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from shopcare.api.dependencies import get_session
 from shopcare.schemas.policy_models import PolicySearchHit
-from shopcare.services.policy_retriever import search_policy_chunks
+from shopcare.services.policies.lexical_retriever import search_policy_chunks
 
 router = APIRouter(prefix="/api/policies", tags=["policies"])
 

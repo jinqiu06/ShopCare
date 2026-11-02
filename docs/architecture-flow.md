@@ -46,7 +46,48 @@
 
 `api/orders.py` 与 `tools/orders.py` 是两种入口；共同复用 `services/orders.py`。services 不导入 api 或 tools，不依赖 HTTPException。tools 不调用 HTTP 路由。工具错误码与 HTTP 状态码分别在对应入口转换。
 
-services 中现有文件按职责阅读：`orders.py` 是订单业务；`policy_loader/filter/chunker/store.py` 是政策资料处理；`policy_retriever.py` 是词法检索；`embeddings/policy_embeddings/semantic_retriever.py` 是向量与语义检索；`llm/answer_generation/order_answers.py` 是客户端、回答生成及固定链路编排。暂沿用现有文件位置与导入路径。
+政策服务现已归入 `services/policies/`，顶层保留订单查询、固定回答编排、回答生成和通用模型模块。所有仓库内导入及测试已同步迁移，旧模块路径不再提供。函数名及业务行为不变。
+
+### 模块输入、输出与修改位置
+
+以下路径相对于 `backend/src/shopcare/services/`。
+
+| 模块 | 主要输入 | 主要输出 / 副作用 | 修改场景 |
+|---|---|---|---|
+| `orders.py` | Session、可信用户、订单号/分页 | ORM订单与商品；只读数据库 | 订单查询和归属规则 |
+| `order_answers.py` | 可信用户、订单/商品、问题、日期、客户端 | 可信订单上下文或PolicyAnswer与AIMessage | 固定回答流程如何串联 |
+| `answer_generation.py` | 问题、订单事实、证据、日期 | 消息、结构化答案、日期差；可能调用对话模型 | 提示词、引用和回答解析 |
+| `embeddings.py` | Settings或两个向量 | embedding客户端或余弦相似度 | 模型配置和基础向量计算 |
+| `llm.py` | Settings | 对话客户端；构造时不发请求 | 对话模型超时及客户端配置 |
+| `policies/loader.py` | 文件/目录 | 校验后的PolicyDocument | 政策文件格式与读取 |
+| `policies/filter.py` | 内存政策对象、类别、日期 | 有效政策对象 | 独立内存过滤；数据库检索不经此模块 |
+| `policies/chunker.py` | PolicyDocument、窗口参数 | 带原文位置的PolicyChunk列表 | 切分窗口与重叠 |
+| `policies/store.py` | Session、政策与片段 | 写入片段数量；flush、不commit | 按政策版本替换片段 |
+| `policies/embeddings.py` | 片段、客户端或Session、向量/模型/维度 | 政策向量生成、保存及读取；可能外部调用或写库 | embedding输入文本和政策向量校验 |
+| `policies/lexical_retriever.py` | Session、问题、类别、日期、top_k | 有效候选或词法命中 | Bigram、词法评分、数据库候选过滤 |
+| `policies/semantic_retriever.py` | Session、embedding客户端、问题、类别、日期 | 语义候选、分数；可能调用问题embedding | 向量检索与排序 |
+
+`services/embeddings.py` 是客户端及通用计算，`services/policies/embeddings.py` 是政策片段向量业务，两者不合并。`policies/filter.py` 处理内存文档，`lexical_retriever.list_effective_chunks` 在SQL中过滤片段，两种数据对象与调用场景不同。
+
+### 两条流程
+
+```mermaid
+flowchart TD
+    subgraph PREP["知识库准备：在提问前运行"]
+        LOAD["policies.loader"] --> CHUNK["policies.chunker"]
+        CHUNK --> STORE["policies.store：保存片段"]
+        STORE --> INDEX["build_policy_index命令"]
+        INDEX --> EMB["policies.embeddings：生成与保存向量"]
+    end
+    subgraph QUERY["提问时：现有固定回答链路"]
+        Q["order_answers：订单归属和商品事实"] --> SEARCH["policies.semantic_retriever：类别/日期 → 向量读取 → 问题embedding → 排序"]
+        SEARCH --> GEN["answer_generation：证据和订单事实 → 模型 → 引用校验"]
+    end
+    EMB -.已保存的政策向量.-> SEARCH
+    LEX["词法HTTP搜索/对照命令"] --> BASE["policies.lexical_retriever：数据库候选过滤与词法评分"]
+```
+
+词法和语义检索仍可独立对照，当前固定回答使用语义路径；图中不表示两者已做混合排序。政策工具复用订单上下文与语义检索，不自行生成回答。
 
 下方全局图展示现有HTTP/CLI入口；独立工具执行图见本页11月2日验收记录，尚未接入Agent。未来Agent编排模块将在对应任务开始时创建。
 
@@ -155,7 +196,7 @@ flowchart TD
     COS --> TOP["分数降序 / chunk_id 升序 → top_k"]
 ```
 
-类别和有效期使用 [effective_from, effective_until)；失效日期可为空。语义检索尚无相关性阈值，因此可能向无关问题返回候选。独立 policy_filter.py 的 is_policy_effective / filter_applicable_policies 是早期内存过滤函数，当前数据库检索使用 list_effective_chunks，不重复经过它们。
+类别和有效期使用 [effective_from, effective_until)；失效日期可为空。语义检索尚无相关性阈值，因此可能向无关问题返回候选。独立 policies/filter.py 的 is_policy_effective / filter_applicable_policies 是早期内存过滤函数，当前数据库检索使用 list_effective_chunks，不重复经过它们。
 
 ## 如何运行
 
@@ -211,13 +252,13 @@ Set-Location D:\VsCode\ShopCare
 | services/llm.py | `build_chat_client` |
 | services/order_answers.py | `get_order_answer_context`, `answer_order_question` |
 | services/orders.py | `get_order_for_user`, `list_orders_for_user`, `get_order_items_for_user` |
-| services/policy_chunker.py | `split_policy` |
-| services/policy_embeddings.py | `embed_policy_chunks`, `save_policy_embeddings`, `load_policy_embeddings` |
-| services/policy_filter.py | `is_policy_effective`, `filter_applicable_policies` |
-| services/policy_loader.py | `load_policy`, `load_policies` |
-| services/policy_retriever.py | `list_effective_chunks`, `tokenize_query`, `score_chunk`, `search_policy_chunks` |
-| services/policy_store.py | `replace_policy_chunks` |
-| services/semantic_retriever.py | `search_semantic_policy_chunks` |
+| services/policies/chunker.py | `split_policy` |
+| services/policies/embeddings.py | `embed_policy_chunks`, `save_policy_embeddings`, `load_policy_embeddings` |
+| services/policies/filter.py | `is_policy_effective`, `filter_applicable_policies` |
+| services/policies/loader.py | `load_policy`, `load_policies` |
+| services/policies/lexical_retriever.py | `list_effective_chunks`, `tokenize_query`, `score_chunk`, `search_policy_chunks` |
+| services/policies/store.py | `replace_policy_chunks` |
+| services/policies/semantic_retriever.py | `search_semantic_policy_chunks` |
 
 
 ## 单次回答演示入口（2026-10-31 新增）
@@ -353,7 +394,7 @@ flowchart TD
 
 ### 政策工具基本结果验证通过（身份编号去空白与异常处理待补）
 
-开发者已增加三个字段的空白拒绝、统一ok/data返回及SemanticPolicySearchHit的JSON序列化；空结果按成功空列表处理。助手复用test_semantic_retriever.py的engine/client fixture，新增test_policy_tool_blank_fields_do_not_access_context_or_search（三项）及test_policy_tool_uses_bound_date_and_item_category_and_serializes（两项）：覆盖空白字段不查询、绑定日期和商品类别、实际语义检索服务、JSON日期序列化、无候选不调用embedding。上下文查询使用模拟返回，完整归属链路尚待补测。该文件26项测试通过，-W error无警告，格式与代码检查通过，无真实模型调用。
+开发者已增加三个字段的空白拒绝、统一ok/data返回及SemanticPolicySearchHit的JSON序列化；空结果按成功空列表处理。助手复用tests/services/policies/test_semantic_retriever.py的engine/client fixture，新增test_policy_tool_blank_fields_do_not_access_context_or_search（三项）及test_policy_tool_uses_bound_date_and_item_category_and_serializes（两项）：覆盖空白字段不查询、绑定日期和商品类别、实际语义检索服务、JSON日期序列化、无候选不调用embedding。上下文查询使用模拟返回，完整归属链路尚待补测。该文件26项测试通过，-W error无警告，格式与代码检查通过，无真实模型调用。
 
 仍需由开发者修正get_order_answer_context调用的order_id/item_id去空白；目前仅query去空白。LookupError、数据库/模型服务/索引校验错误尚未转换为工具错误。无新增运行函数，主调用图不变，政策工具尚未整体验收。
 
@@ -379,3 +420,10 @@ flowchart TD
 助手新增验证函数test_policy_tool_executor_real_ownership_and_retrieval、test_policy_tool_denied_context_never_embeds、test_policy_tool_executor_rejects_untrusted_context_and_bad_input、test_policy_tool_failures_are_safe_and_never_call_chat及其内部故障注入辅助函数fail_context。均属测试，不进入业务运行图。复用既有临时库和answer_clients fixture，验证真实归属、两个商品类别、编号去空白、严格拒绝身份/日期/类别覆盖、模型/索引/数据库故障，不调用对话模型。
 
 完整离线回归384项通过，-W error无警告；全后端Ruff通过，61个Python文件格式检查通过。本轮无真实模型调用，不以离线结果宣称实际模型选工具已验证。工具未接入HTTP、Agent或会话；仅支持项目内dict参数/结果，尚非完整ToolCall/ToolMessage执行器。工具不接管事务；数据库故障后由外层处理Session。检索失败错误未细分可重试性，不能自动无限重试。运行与目录职责不因新增工具而复制核心业务逻辑。
+
+
+## 2026-11-02｜政策目录重组
+
+用户明确要求按领域整理平铺目录。助手移动七个政策服务及对应七个测试模块至policies子目录，文件名去掉重复policy前缀，policy_retriever改为lexical_retriever；原函数与模型不变，业务代码与测试仅更新导入。新增services/policies/__init__.py仅声明包，无函数，不调用核心服务。无新增业务或测试函数；函数清单上方已按新路径更新。
+
+修改引用覆盖API、CLI、固定回答服务、政策工具和测试；原HTTP路径与CLI模块入口不变。不保留旧Python导入兼容层，本仓库外若手工使用旧模块名需要更新。本次不修改数据库或调用真实模型。该段覆盖前文“保留原目录”的历史说明；最终验证结果见当日进度。

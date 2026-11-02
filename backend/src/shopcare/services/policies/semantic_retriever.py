@@ -9,8 +9,8 @@ from shopcare.schemas.policy_models import (
     SemanticPolicySearchHit,
 )
 from shopcare.services.embeddings import cosine_similarity
-from shopcare.services.policy_embeddings import load_policy_embeddings
-from shopcare.services.policy_retriever import list_effective_chunks
+from shopcare.services.policies.embeddings import load_policy_embeddings
+from shopcare.services.policies.lexical_retriever import list_effective_chunks
 
 
 def search_semantic_policy_chunks(

@@ -22,7 +22,7 @@
 
 ## 开发者负责的核心实现
 
-已实现 `schemas/policy_models.py` 与 `services/policy_loader.py`，文件加载及以下校验已通过测试。
+已实现 `schemas/policy_models.py` 与 `services/policies/loader.py`，文件加载及以下校验已通过测试。
 
 1. 用 Pydantic BaseModel 定义 PolicyDocument，日期用 date，正文保留原文。
 2. load_policy(path: Path) -> PolicyDocument：UTF-8 读取并校验一个 JSON 文件。
@@ -38,7 +38,7 @@
 
 ## 已实现：适用政策过滤
 
-已在 `services/policy_filter.py` 中实现两个纯函数，不做文件读取、数据库访问或模型调用：
+已在 `services/policies/filter.py` 中实现两个纯函数，不做文件读取、数据库访问或模型调用：
 
 - is_policy_effective(policy, as_of)：有效区间为 effective_from <= as_of < effective_until；无结束日期只检查开始日期。
 - filter_applicable_policies(policies, category, as_of)：同时按精确类别和有效日期筛选，保留输入顺序；不改动原列表，也不删除历史版本。
@@ -50,7 +50,7 @@
 
 ## 下一步：可追溯的切分基线
 
-在 schemas/policy_models.py 定义 PolicyChunk，在 services/policy_chunker.py 实现 split_policy。第一版按 Python 字符位置切片，不按字节或 token 计数。
+在 schemas/policy_models.py 定义 PolicyChunk，在 services/policies/chunker.py 实现 split_policy。第一版按 Python 字符位置切片，不按字节或 token 计数。
 
 默认 chunk_size=300、overlap=50；要求 chunk_size 为正整数且 0 <= overlap < chunk_size。片段位置为 [start_char, end_char)，text 必须等于原文相应切片，不 strip 或改写原文。
 

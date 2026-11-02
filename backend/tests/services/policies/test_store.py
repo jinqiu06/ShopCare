@@ -8,8 +8,8 @@ from sqlalchemy.orm import Session
 from shopcare.db import build_engine, init_db
 from shopcare.db.models import PolicyChunkRecord
 from shopcare.schemas.policy_models import PolicyDocument
-from shopcare.services.policy_chunker import split_policy
-from shopcare.services.policy_store import replace_policy_chunks
+from shopcare.services.policies.chunker import split_policy
+from shopcare.services.policies.store import replace_policy_chunks
 
 
 @pytest.fixture

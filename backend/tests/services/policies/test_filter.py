@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 
 from shopcare.schemas.policy_models import PolicyDocument
-from shopcare.services.policy_filter import filter_applicable_policies, is_policy_effective
-from shopcare.services.policy_loader import load_policies
+from shopcare.services.policies.filter import filter_applicable_policies, is_policy_effective
+from shopcare.services.policies.loader import load_policies
 
 
 def make_policy(**overrides):
@@ -50,7 +50,7 @@ def test_open_ended_policy_still_requires_start(as_of, expected):
 
 @pytest.mark.parametrize("category,count", [("数码", 3), ("配件", 3), ("unknown", 0)])
 def test_sample_category_and_date_filter(category, count):
-    policies = load_policies(Path(__file__).resolve().parents[3] / "data/policies")
+    policies = load_policies(Path(__file__).resolve().parents[4] / "data/policies")
     result = filter_applicable_policies(policies, category, date(2026, 11, 2))
     assert len(result) == count
     assert all(p.category == category for p in result)
@@ -65,7 +65,7 @@ def test_sample_category_and_date_filter(category, count):
     ],
 )
 def test_sample_version_cutover_has_no_overlap(as_of, version):
-    policies = load_policies(Path(__file__).resolve().parents[3] / "data/policies")
+    policies = load_policies(Path(__file__).resolve().parents[4] / "data/policies")
     result = filter_applicable_policies(policies, "数码", as_of)
     returns = [p for p in result if p.policy_id == "digital-return"]
     assert len(returns) == 1

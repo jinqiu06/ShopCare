@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from shopcare.db import build_engine, init_db
 from shopcare.db.models import PolicyChunkRecord, PolicyEmbeddingRecord
-from shopcare.services.policy_embeddings import embed_policy_chunks, save_policy_embeddings
+from shopcare.services.policies.embeddings import embed_policy_chunks, save_policy_embeddings
 
 
 def make_chunks():
@@ -218,7 +218,7 @@ def test_database_failure_rolls_back_deletion(engine):
 
 
 def test_load_returns_only_requested_chunk(engine):
-    from shopcare.services.policy_embeddings import load_policy_embeddings
+    from shopcare.services.policies.embeddings import load_policy_embeddings
 
     with Session(engine) as session:
         chunk = session.get(PolicyChunkRecord, "first:v1:000")
@@ -229,7 +229,7 @@ def test_load_returns_only_requested_chunk(engine):
 
 @pytest.mark.parametrize("mode", ["missing", "model", "dimensions", "partial"])
 def test_load_rejects_incomplete_or_incompatible_index(engine, mode):
-    from shopcare.services.policy_embeddings import load_policy_embeddings
+    from shopcare.services.policies.embeddings import load_policy_embeddings
 
     with Session(engine) as session:
         first = session.get(PolicyChunkRecord, "first:v1:000")
@@ -248,7 +248,7 @@ def test_load_rejects_incomplete_or_incompatible_index(engine, mode):
 
 
 def test_load_empty_chunks_does_not_query():
-    from shopcare.services.policy_embeddings import load_policy_embeddings
+    from shopcare.services.policies.embeddings import load_policy_embeddings
 
     session = Mock(spec=Session)
     assert load_policy_embeddings(session, [], "old-model", 2) == {}
