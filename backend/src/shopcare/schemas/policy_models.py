@@ -54,3 +54,11 @@ class PolicySearchHit(BaseModel):
 class SemanticPolicySearchHit(BaseModel):
     chunk: PolicyChunk
     score: float = Field(allow_inf_nan=False)
+
+
+class OrderPolicySearchInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    order_id: str = Field(min_length=1, max_length=100)
+    item_id: str = Field(min_length=1, max_length=100)
+    query: str = Field(min_length=1, max_length=1000)

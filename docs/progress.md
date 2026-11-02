@@ -215,3 +215,24 @@
 - 本次真实HTTP样例的连通性、澄清状态与执行边界通过。依据为用户截图，助手没有重复请求；截图未提供实际模型标识、耗时或usage，不推算这些数据。
 - 保留内容问题：limitations解释15日质量换货窗口及政策步骤，但citation_chunk_ids为空，政策表述缺少可追溯引用；还出现days_since_delivery内部字段名，用户表达可后续改善。当前解析器只要求answered状态必须有引用，因此本例通过结构校验不等于所有政策表述均有引用。
 - 这是一次模糊故障样例的真实HTTP验证，不代表所有问题稳定通过；无需为同一样例重复付费调用。今天任务收口，引用约束作为后续改进项。
+
+## 2026-11-02｜工具阶段开始：目录职责整理
+
+- 今日目标：订单查询与政策检索的工具封装、可信身份、参数与错误语义，独立调用验收后收口；尚未接Agent循环。
+- 用户要求先整理目录并明确分工。助手新增 tools/__init__.py（仅声明包，无函数、无业务调用）与 tools/README.md（文件安排、分层边界及人员职责）；补充 architecture-flow 的同名模块说明。
+- 当前未移动已有运行文件或改变导入路径；tools/orders.py 由开发者接下来创建并实现，tools/policies.py 为后续任务文件，均未创建占位实现。
+- 开发者负责核心服务和工具逻辑；助手负责测试、辅助脚本、格式、文档、审查及验证。当天功能验收完成后按持续授权提交推送，本步不代表今日功能已完成。
+
+### 订单工具及执行入口小步验收
+
+开发者已实现tools/orders.py的build_order_tools/lookup_order、schemas/orders.py的OrderLookupInput以及tools/executor.py的execute_tool。订单工具绑定服务端身份、严格输入、复用订单服务并序列化公开字段；数据库异常转TEMPORARILY_UNAVAILABLE。执行入口单独转换未知工具与输入校验失败，保留执行内部异常的真实含义。助手复用订单服务测试fixture补边界验证及格式/流程文档，当前该文件54项测试通过，无真实模型调用。尚未接Agent/HTTP，政策工具待实现，今天还未收口或推送。此前目录整理新增的tools/README.md当前已不在工作区，工具职责以architecture-flow为准。
+
+
+### 11月2日收口：只读工具与执行入口完成
+
+- 开发者核心文件：tools/orders.py（build_order_tools、lookup_order）、tools/policy.py（build_policy_tools、search_order_policies）、tools/executor.py（execute_tool）；schemas/orders.py和schemas/policy_models.py新增严格输入模型。均复用既有业务服务，不复制SQL或检索算法。
+- 助手工程辅助：新增tools/__init__.py，仅声明包、不调用核心函数；在既有两个服务测试文件补验证，整理格式、目录职责、README与调用图。先前临时创建的tools/README.md已移除，本次交付不包含该文件。
+- 完整离线回归384项通过，-W error无警告；全后端Ruff、61个Python文件格式检查通过。测试使用独立临时库与模拟客户端，不修改演示数据库，本轮无真实模型调用。
+- 验证订单正常/越权/不存在、可信上下文不可覆盖、框架校验与执行内部错误分离；政策工具完整订单归属到语义检索、两个商品类别、空白输入、正常空结果、公开证据序列化、索引/超时/服务/数据库失败。
+- 边界：尚未接Agent、HTTP工具入口或ToolCall/ToolMessage协议；Session由外层管理，数据库故障需外层结束或恢复事务；检索失败尚未细分重试策略；昨天澄清回答中的无引用政策解释仍为后续改进项。
+- 当天约定工具范围完成。下一阶段候选为有界模型工具循环，届时先讲状态、预算及失败终止，再由开发者实现。按持续授权执行本轮GitHub提交推送，结果以实际推送核验为准。

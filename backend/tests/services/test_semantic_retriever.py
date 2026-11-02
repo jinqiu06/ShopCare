@@ -8,8 +8,52 @@ from sqlalchemy.orm import Session
 from shopcare.db import build_engine, init_db
 from shopcare.db.models import PolicyChunkRecord, PolicyEmbeddingRecord
 from shopcare.services.semantic_retriever import search_semantic_policy_chunks
+from shopcare.tools.policy import build_policy_tools
 
 AS_OF = date(2026, 10, 30)
+
+
+@pytest.mark.parametrize("field", ["order_id", "item_id", "query"])
+def test_policy_tool_blank_fields_do_not_access_context_or_search(monkeypatch, field):
+    from shopcare.tools import policy
+
+    context, search = Mock(), Mock()
+    monkeypatch.setattr(policy, "get_order_answer_context", context)
+    monkeypatch.setattr(policy, "search_semantic_policy_chunks", search)
+    arguments = {"order_id": "O004", "item_id": "O004-I01", "query": "换货"}
+    arguments[field] = "   "
+    lookup = build_policy_tools(Mock(), Mock(), "U001", AS_OF)[0]
+    assert lookup.invoke(arguments) == {
+        "ok": False,
+        "error": {"code": "INVALID_ARGUMENT", "message": "订单号、商品项编号和问题不能为空"},
+    }
+    context.assert_not_called()
+    search.assert_not_called()
+
+
+@pytest.mark.parametrize("category", ["数码", "不存在"])
+def test_policy_tool_uses_bound_date_and_item_category_and_serializes(
+    engine, client, monkeypatch, category
+):
+    import json
+
+    from shopcare.tools import policy
+
+    context = Mock(return_value=(Mock(), Mock(category=category)))
+    monkeypatch.setattr(policy, "get_order_answer_context", context)
+    with Session(engine) as session:
+        lookup = build_policy_tools(session, client, "U001", AS_OF)[0]
+        result = lookup.invoke({"order_id": "O004", "item_id": "O004-I01", "query": " 换货 "})
+        context.assert_called_once_with(session, "U001", "O004", "O004-I01")
+    assert result["ok"] is True
+    json.dumps(result, allow_nan=False)
+    if category == "数码":
+        assert [hit["chunk"]["chunk_id"] for hit in result["data"]] == ["A", "B", "C"]
+        assert result["data"][0]["chunk"]["effective_from"] == "2026-10-01"
+        client.embed_query.assert_called_once_with("换货")
+    else:
+        assert result["data"] == []
+        client.embed_query.assert_not_called()
 
 
 @pytest.fixture

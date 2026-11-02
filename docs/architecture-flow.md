@@ -1,13 +1,13 @@
 # ShopCare 结构与运行流程
 
-核对日期：2026-11-01。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
+核对日期：2026-11-02。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
 
 ## 当前状态
 
 - 已运行验证：订单 API、词法检索 API、政策导入、向量构建、语义检索和十题真实对照。
 - 单次回答CLI与HTTP入口均已接入并做离线验证。此前CLI真实试跑发现能力承诺和日期问题，最终日期修复仅做一个真实样例回归；本次未新增真实模型HTTP验证。
 - HTTP 搜索仍调用词法检索，已有 answer_order CLI 与 POST /api/orders/{order_id}/answer 回答路由。启动 FastAPI 不会自动运行回答函数。
-- LangGraph 工具循环、会话记忆、售后申请尚未实现。
+- 订单查询/政策检索工具与execute_tool已独立离线验收；LangGraph工具循环、会话记忆、售后申请尚未实现。
 
 ## 目录职责
 
@@ -21,6 +21,7 @@
 | db/ | Base、连接/建表、SQLAlchemy ORM 表 |
 | schemas/ | Pydantic 输入输出结构与校验；不是数据库表 |
 | services/ | 核心函数：订单归属、政策加载/切分/检索、回答与引用校验 |
+| tools/ | 模型工具适配：参数说明、绑定可信身份、调用 services、结构化结果；订单/政策工具和统一入口已独立离线验收，尚未接入 Agent |
 | scripts/ | main() 命令入口，组织配置、资源、事务和输出，复用 services |
 | backend/tests/ | 离线测试，使用模拟模型和临时数据库 |
 | data/policies/ | 八份自编模拟政策 JSON |
@@ -30,6 +31,24 @@
 | .env / .env.example | 实际本地配置 / 可提交配置模板；仅 .env 自动加载 |
 
 ## 全局关系
+
+### 同名模块的分工
+
+| 层与模块 | 面向谁 | 负责什么 | 核心实现负责人 |
+|---|---|---|---|
+| `api/orders.py` | HTTP 调用方 | 路由、请求依赖、HTTP 状态与响应 | 开发者 |
+| `services/orders.py` | API、CLI 和工具 | 按可信用户身份查订单、列表和商品项 | 开发者 |
+| `schemas/orders.py` | 各层数据传递 | 公开数据字段、校验与序列化 | 开发者 |
+| `db/models.py` | 业务服务 | 数据库表、关系及约束 | 开发者 |
+| `tools/orders.py` | 模型工具执行方 | 工具说明和参数、绑定服务端身份、调用订单服务、返回工具结果 | 开发者 |
+| `scripts/` | 命令行使用者 | 组织配置、资源、预览和报告，复用核心函数 | 助手维护常规辅助命令；核心算法仍由开发者实现 |
+| `backend/tests/` | 开发验证 | 模拟外部服务、临时数据库、参数/隔离/失败回归 | 助手补充，开发者可共同学习和审查 |
+
+`api/orders.py` 与 `tools/orders.py` 是两种入口；共同复用 `services/orders.py`。services 不导入 api 或 tools，不依赖 HTTPException。tools 不调用 HTTP 路由。工具错误码与 HTTP 状态码分别在对应入口转换。
+
+services 中现有文件按职责阅读：`orders.py` 是订单业务；`policy_loader/filter/chunker/store.py` 是政策资料处理；`policy_retriever.py` 是词法检索；`embeddings/policy_embeddings/semantic_retriever.py` 是向量与语义检索；`llm/answer_generation/order_answers.py` 是客户端、回答生成及固定链路编排。暂沿用现有文件位置与导入路径。
+
+下方全局图展示现有HTTP/CLI入口；独立工具执行图见本页11月2日验收记录，尚未接入Agent。未来Agent编排模块将在对应任务开始时创建。
 
 ```mermaid
 flowchart TD
@@ -288,3 +307,75 @@ flowchart TD
 新增测试函数 test_answer_api_database_failure_is_safe_error 与 test_answer_api_real_pipeline_with_simulated_models：验证数据库异常，以及保留真实HTTP、订单事实、检索、消息构造和引用校验的正常回答/非法JSON/伪造引用/缺失索引。仅替换外部模型客户端，使用临时数据库；缺失索引不调用模型。运行函数无新增，主调用图不变。
 
 最终离线回归346项通过，-W error 无警告；全后端Ruff与格式检查结果见当日进度。未新增真实付费调用，不把离线通过等同于语义正确或真实模型稳定；仍无Agent、记忆或售后写操作。
+
+## 2026-11-02｜订单工具初稿审查（未验收）
+
+新增源码函数 tools/orders.py 的 build_order_tools 与内部工具 lookup_order。工厂绑定服务端 Session/user_id，工具schema目前仅暴露order_id。预期连接：独立tool.invoke → lookup_order → services.orders.get_order_for_user → OrderResponse；尚未接HTTP或Agent，不改变已有固定回答链路。
+
+初稿实测：空白订单号抛ValueError；正常订单号因遗漏session参数而抛TypeError。成功结果data仍为Ellipsis占位，尚未实现序列化。应由开发者补齐INVALID_ARGUMENT结构化错误、传递session和成功数据转换，之后再做隔离/错误验证。尚未运行通过工具业务测试。源码函数清单补充：tools/orders.py — build_order_tools、lookup_order（内部工具，待验收）。
+
+### 订单工具基本行为验证通过（数据库异常待实现）
+
+开发者已补齐空白订单号的INVALID_ARGUMENT结果、get_order_for_user(session, user_id, order_id.strip())调用，以及OrderResponse JSON序列化。助手仅整理格式并在现有test_order_service.py复用session fixture，新增test_order_tool_invocation_and_safe_output、test_order_tool_schema_and_separate_user_bindings：六项实例覆盖正常查询、去空白、两名用户、他人/不存在订单同错、公开字段与JSON序列化、仅暴露order_id及额外身份参数不切换用户。当前额外字段被框架忽略，不代表已严格拒绝额外参数。
+
+该测试文件41项通过，-W error 无警告；使用临时库，无外部模型调用。调用关系已成立：独立tool.invoke → lookup_order → get_order_for_user → OrderResponse；仍未接Agent/HTTP。数据库异常以及缺字段/错误类型的框架校验转换尚待处理，不宣称整体工具已验收。运行函数无新增，主应用调用图不变。
+
+### 订单工具数据库故障验证通过
+
+开发者已在lookup_order将SQLAlchemyError转换为TEMPORARILY_UNAVAILABLE，保留固定提示，不暴露内部SQL，不自行commit/rollback/close外层Session。现有test_order_tool_database_failure_is_safe_and_keeps_transaction_ownership验证上述边界；订单服务测试文件42项通过，-W error无警告，相关Ruff和格式检查通过。缺失order_id/错误类型实测由LangChain输入校验抛ValidationError，尚未进入工具函数；后续执行层需要统一转换此类框架校验错误。当前额外参数仍被忽略，计划用显式args_schema严格拒绝。无新增运行函数，主调用关系不变。
+
+### 订单工具显式输入模型验证通过
+
+开发者新增schemas/orders.py的OrderLookupInput类（无新增函数），并通过@tool(args_schema=OrderLookupInput)接入lookup_order，严格字符串、长度1–100、拒绝额外字段。助手调整原先“额外身份被忽略”的测试为“额外身份被拒绝”，新增test_order_tool_rejects_invalid_schema_before_query，六项实例覆盖缺字段、数字、None、空字符串、超长值和额外user_id，均在数据库查询前抛ValidationError。订单服务文件48项测试通过，-W error无警告；无外部模型调用。tools/orders.py调用关系不变，尚未接Agent。下一步由开发者实现统一工具执行入口，转换输入校验错误与未知工具名；不应把业务执行中出现的所有ValidationError都归为输入错误。
+
+## 2026-11-02｜统一工具执行入口已验证
+
+开发者新增 tools/executor.py 的 execute_tool：按服务端工具注册表查找名称，未知名称返回UNKNOWN_TOOL；通过get_input_schema().model_validate单独校验输入，失败返回INVALID_ARGUMENT；invoke在该捕获块之外，避免将执行内部的数据校验错误误归为输入错误。只支持当前字典参数/字典结果的项目工具，尚未实现完整模型ToolCall/ToolMessage协议或Agent循环。
+
+```mermaid
+flowchart TD
+    CALL["独立调用 execute_tool：工具表、名称、参数"] --> LOOKUP{"名称已注册？"}
+    LOOKUP -->|否| UNKNOWN["UNKNOWN_TOOL"]
+    LOOKUP -->|是| VALID{"输入schema校验通过？"}
+    VALID -->|否| INVALID["INVALID_ARGUMENT"]
+    VALID -->|是| INVOKE["selected.invoke"]
+    INVOKE --> ORDER["lookup_order：可信身份 → get_order_for_user"]
+    ORDER --> RESULT["成功数据 / ORDER_NOT_FOUND / TEMPORARILY_UNAVAILABLE"]
+```
+
+新增源码函数清单：tools/executor.py — execute_tool。新增测试函数：test_tool_executor_dispatches_real_order_tool、test_tool_executor_unknown_tool_does_not_invoke_registered_tool、test_tool_executor_converts_input_errors_before_invocation、test_tool_executor_does_not_misclassify_internal_validation_error。六项实例覆盖真实订单工具派发、越权、未知工具、三个输入错误和内部ValidationError传播。订单服务测试文件54项通过，-W error无警告；格式与代码检查通过，无模型调用。今日政策工具尚未实现，今日范围尚未完成。
+
+## 2026-11-02｜政策工具初稿（待验收）
+
+开发者实际创建tools/policy.py（使用单数文件名，沿用该路径），新增build_policy_tools及内部search_order_policies。参数由OrderPolicySearchInput声明，仅order_id/item_id/query；可信user_id/as_of/session/embedding_client由工厂绑定。调用关系：独立tool.invoke → get_order_answer_context归属/商品检查 → search_semantic_policy_chunks（类别取自商品）→候选证据。未接Agent/HTTP。
+
+初稿审查：调用顺序与类别来源正确，但当前直接返回list[SemanticPolicySearchHit]，与dict注解及统一ok/data协议不符；空白字段未统一拒绝、订单商品编号未strip、归属及检索异常尚未转换。模拟空检索实测返回裸列表[]，工具参数只有order_id/item_id/query；无真实数据库或模型调用。需由开发者补结果序列化和输入/错误边界，尚未验收。助手仅整理本轮代码格式。源码函数清单新增：tools/policy.py — build_policy_tools、search_order_policies。
+
+### 政策工具基本结果验证通过（身份编号去空白与异常处理待补）
+
+开发者已增加三个字段的空白拒绝、统一ok/data返回及SemanticPolicySearchHit的JSON序列化；空结果按成功空列表处理。助手复用test_semantic_retriever.py的engine/client fixture，新增test_policy_tool_blank_fields_do_not_access_context_or_search（三项）及test_policy_tool_uses_bound_date_and_item_category_and_serializes（两项）：覆盖空白字段不查询、绑定日期和商品类别、实际语义检索服务、JSON日期序列化、无候选不调用embedding。上下文查询使用模拟返回，完整归属链路尚待补测。该文件26项测试通过，-W error无警告，格式与代码检查通过，无真实模型调用。
+
+仍需由开发者修正get_order_answer_context调用的order_id/item_id去空白；目前仅query去空白。LookupError、数据库/模型服务/索引校验错误尚未转换为工具错误。无新增运行函数，主调用图不变，政策工具尚未整体验收。
+
+
+## 2026-11-02｜只读工具阶段离线验收完成
+
+本节更新此前逐步审查中的待实现状态：订单工具、严格参数schema、政策工具和统一执行入口均已实现并验证。新增运行函数清单：tools/orders.py的build_order_tools、lookup_order；tools/policy.py的build_policy_tools、search_order_policies；tools/executor.py的execute_tool。新增输入类OrderLookupInput、OrderPolicySearchInput不定义额外函数，tools/__init__.py仅声明包。
+
+```mermaid
+flowchart TD
+    ENTRY["execute_tool：服务端工具注册表 + 名称 + 参数"] --> SCHEMA["未知工具/输入错误转换；校验通过后invoke"]
+    SCHEMA --> ORDER["lookup_order：可信user_id"]
+    ORDER --> SERVICE["get_order_for_user → OrderResponse"]
+    SCHEMA --> POLICY["search_order_policies：可信user_id/as_of"]
+    POLICY --> CONTEXT["get_order_answer_context：订单归属 + 商品关系"]
+    CONTEXT --> CATEGORY["使用商品category"]
+    CATEGORY --> SEARCH["search_semantic_policy_chunks：日期过滤 + 索引校验 + embedding + 排序"]
+    SEARCH --> RESULT["ok/data：JSON证据列表，可为空"]
+    CONTEXT --> DENIED["不可访问：ORDER_CONTEXT_NOT_FOUND；不检索"]
+    SEARCH --> FAIL["数据库/模型服务/ValueError：RETRIEVAL_UNAVAILABLE"]
+```
+
+助手新增验证函数test_policy_tool_executor_real_ownership_and_retrieval、test_policy_tool_denied_context_never_embeds、test_policy_tool_executor_rejects_untrusted_context_and_bad_input、test_policy_tool_failures_are_safe_and_never_call_chat及其内部故障注入辅助函数fail_context。均属测试，不进入业务运行图。复用既有临时库和answer_clients fixture，验证真实归属、两个商品类别、编号去空白、严格拒绝身份/日期/类别覆盖、模型/索引/数据库故障，不调用对话模型。
+
+完整离线回归384项通过，-W error无警告；全后端Ruff通过，61个Python文件格式检查通过。本轮无真实模型调用，不以离线结果宣称实际模型选工具已验证。工具未接入HTTP、Agent或会话；仅支持项目内dict参数/结果，尚非完整ToolCall/ToolMessage执行器。工具不接管事务；数据库故障后由外层处理Session。检索失败错误未细分可重试性，不能自动无限重试。运行与目录职责不因新增工具而复制核心业务逻辑。

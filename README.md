@@ -1,6 +1,6 @@
 # ShopCare
 
-面向电商售后场景的 Agent 后端项目。当前已完成订单查询、用户范围过滤、商品项查询、分页、模拟数据初始化和政策文件加载校验；已完成词法/语义检索及单次回答 HTTP 接入；模型工具调用与记忆机制尚未实现。
+面向电商售后场景的 Agent 后端项目。当前已完成订单查询、用户范围过滤、商品项查询、分页、模拟数据初始化和政策文件加载校验；已完成词法/语义检索及单次回答 HTTP 接入；只读订单/政策工具及统一执行入口已完成独立离线验证，模型自主工具循环与记忆机制尚未实现。
 
 ## 当前功能
 
@@ -10,7 +10,7 @@
 - SQLAlchemy 模型包含外键、状态、非负金额和正数数量约束；SQLite 连接显式开启外键检查。
 - 提供可重复运行的模拟数据命令：2 名用户、20 笔订单、40 个商品项；已有记录不覆盖。
 - Pydantic 配置支持根目录 `.env` 和环境变量覆盖，缺少模型 Key 不影响订单查询。
-- 346 项离线测试（2026-11-01）覆盖配置、数据库、事务回滚、初始化、服务与 API。
+- 384 项离线测试（2026-11-02）覆盖配置、数据库、事务回滚、初始化、服务与 API。
 
 ## 环境与安装
 
@@ -225,3 +225,44 @@ backend/
 配置构造先于订单归属检查，配置失败时优先返回503。参照日期早于签收日目前也按回答阶段校验失败返回500，尚无专门的业务日期错误。模型输出不合规不会转换成正常的 insufficient_evidence 答案。接口仅解释政策，不创建申请。
 
 本次完整离线回归346项通过；HTTP完整链路使用临时数据库和模拟外部模型，覆盖正常输出、非法JSON、伪造引用和缺失索引。用户随后在Swagger完成一次真实调用：HTTP200、needs_clarification、未创建申请，签收3天无日期矛盾；limitations包含政策解释但引用为空，保留可追溯性问题。单例不能证明整体生成可靠性；此前CLI真实试跑的局限仍然成立。
+
+
+## 只读工具与统一执行入口（2026-11-02）
+
+开发者实现 `tools/orders.py`、`tools/policy.py`、`tools/executor.py`，复用现有订单与语义检索服务。工具可以独立调用，尚未接入模型自主选工具、LangGraph、HTTP工具路由或多轮会话。目录职责和完整调用图见 `docs/architecture-flow.md`。
+
+| 工具 | 模型可填写的参数 | 服务端绑定的上下文 | 成功数据 |
+|---|---|---|---|
+| lookup_order | order_id | Session、user_id | 公开订单字段 |
+| search_order_policies | order_id、item_id、query | Session、embedding_client、user_id、as_of | 政策片段和分数列表 |
+
+参数模型严格拒绝额外字段和错误类型；空白值由工具返回INVALID_ARGUMENT。政策类别从已验证归属的商品读取，模型不能指定user_id、category或as_of。政策证据保留来源和版本；无候选是成功空列表，不等于最终确认没有相关政策或用户没有资格。
+
+在服务端已有Session和客户端的执行上下文中，可按下面方式组装工具。该示例不是单独可运行的启动脚本；Session需要由调用方保持打开。
+
+```python
+from shopcare.tools.orders import build_order_tools
+from shopcare.tools.policy import build_policy_tools
+from shopcare.tools.executor import execute_tool
+
+entries = build_order_tools(session, user_id) + build_policy_tools(
+    session, embedding_client, user_id, as_of
+)
+tools = {entry.name: entry for entry in entries}
+result = execute_tool(tools, "lookup_order", {"order_id": "O004"})
+```
+
+execute_tool先查工具名称，再单独校验输入，最后invoke。成功返回`{"ok": true, "data": ...}`；失败返回`{"ok": false, "error": {"code": ..., "message": ...}}`。
+
+| 错误码 | 含义 |
+|---|---|
+| UNKNOWN_TOOL | 工具名未注册 |
+| INVALID_ARGUMENT | schema不合法或字段仅为空白 |
+| ORDER_NOT_FOUND | 订单不存在或不可访问 |
+| ORDER_CONTEXT_NOT_FOUND | 订单/商品不存在或不可访问 |
+| TEMPORARILY_UNAVAILABLE | 订单查询数据库失败 |
+| RETRIEVAL_UNAVAILABLE | 政策工具的数据库、模型服务或检索校验失败 |
+
+工具不管理外层事务，不自行commit/rollback/close。数据库错误返回后，执行方仍需按事务状态结束或恢复Session，不能盲目继续复用。RETRIEVAL_UNAVAILABLE不承诺故障一定短暂：索引缺失或模型维度不匹配需要修复，不应无限重试。execute_tool不把工具内部所有异常伪装成输入错误，意外执行异常留给后续执行层处理。
+
+本轮384项离线测试通过，未新增真实模型调用；政策工具正常检索可能调用一次问题embedding，不调用对话模型，不写数据库。尚未验证真实模型选工具或Agent循环。

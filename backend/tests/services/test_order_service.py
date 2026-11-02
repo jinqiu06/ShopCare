@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from shopcare.db import build_engine, init_db
@@ -9,6 +10,284 @@ from shopcare.services.orders import (
     get_order_items_for_user,
     list_orders_for_user,
 )
+from shopcare.tools.executor import execute_tool
+from shopcare.tools.orders import build_order_tools
+from shopcare.tools.policy import build_policy_tools
+
+
+@pytest.mark.parametrize("item_id,expected", [("O004-I01", "digital"), ("O004-I02", "accessory")])
+def test_policy_tool_executor_real_ownership_and_retrieval(
+    session, answer_clients, item_id, expected
+):
+    from datetime import date
+
+    embedding, chat = answer_clients
+    entries = build_order_tools(session, "U001") + build_policy_tools(
+        session, embedding, "U001", date(2026, 11, 2)
+    )
+    tools = {entry.name: entry for entry in entries}
+    result = execute_tool(
+        tools,
+        "search_order_policies",
+        {"order_id": " O004 ", "item_id": f" {item_id} ", "query": " 换货 "},
+    )
+    assert result["ok"] is True
+    assert [hit["chunk"]["chunk_id"] for hit in result["data"]] == [expected]
+    embedding.embed_query.assert_called_once_with("换货")
+    chat.invoke.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "order_id,item_id", [("missing", "missing"), ("O011", "O011-I01"), ("O004", "O001-I01")]
+)
+def test_policy_tool_denied_context_never_embeds(session, monkeypatch, order_id, item_id):
+    from datetime import date
+    from unittest.mock import Mock
+
+    from shopcare.tools import policy
+
+    embedding, search = Mock(), Mock()
+    monkeypatch.setattr(policy, "search_semantic_policy_chunks", search)
+    entries = build_policy_tools(session, embedding, "U001", date(2026, 11, 2))
+    result = execute_tool(
+        {entry.name: entry for entry in entries},
+        "search_order_policies",
+        {"order_id": order_id, "item_id": item_id, "query": "换货"},
+    )
+    assert result == {
+        "ok": False,
+        "error": {"code": "ORDER_CONTEXT_NOT_FOUND", "message": "订单或商品不存在或不可访问"},
+    }
+    search.assert_not_called()
+    embedding.embed_query.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"user_id": "U002"},
+        {"as_of": "2020-01-01"},
+        {"category": "配件"},
+        {"item_id": 123},
+        {"query": "x" * 1001},
+    ],
+)
+def test_policy_tool_executor_rejects_untrusted_context_and_bad_input(monkeypatch, override):
+    from datetime import date
+    from unittest.mock import Mock
+
+    from shopcare.tools import policy
+
+    context, embedding = Mock(), Mock()
+    monkeypatch.setattr(policy, "get_order_answer_context", context)
+    entries = build_policy_tools(Mock(spec=Session), embedding, "U001", date(2026, 11, 2))
+    arguments = {"order_id": "O004", "item_id": "O004-I01", "query": "换货"}
+    arguments.update(override)
+    result = execute_tool(
+        {entry.name: entry for entry in entries}, "search_order_policies", arguments
+    )
+    assert result["error"]["code"] == "INVALID_ARGUMENT"
+    context.assert_not_called()
+    embedding.embed_query.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ["database", "missing_index", "timeout", "upstream"])
+def test_policy_tool_failures_are_safe_and_never_call_chat(
+    session, answer_clients, monkeypatch, failure
+):
+    from datetime import date
+
+    from openai import OpenAIError
+    from sqlalchemy import delete
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from shopcare.db.models import PolicyEmbeddingRecord
+    from shopcare.tools import policy
+
+    embedding, chat = answer_clients
+    if failure == "database":
+
+        def fail_context(*args):
+            raise SQLAlchemyError("private database detail")
+
+        monkeypatch.setattr(policy, "get_order_answer_context", fail_context)
+    elif failure == "missing_index":
+        session.execute(delete(PolicyEmbeddingRecord))
+        session.flush()
+    else:
+        embedding.embed_query.side_effect = (
+            TimeoutError("private timeout") if failure == "timeout" else OpenAIError("private key")
+        )
+    entries = build_policy_tools(session, embedding, "U001", date(2026, 11, 2))
+    result = execute_tool(
+        {entry.name: entry for entry in entries},
+        "search_order_policies",
+        {"order_id": "O004", "item_id": "O004-I01", "query": "换货"},
+    )
+    assert result == {
+        "ok": False,
+        "error": {"code": "RETRIEVAL_UNAVAILABLE", "message": "政策检索暂时不可用"},
+    }
+    chat.invoke.assert_not_called()
+    if failure in ("database", "missing_index"):
+        embedding.embed_query.assert_not_called()
+
+
+def test_tool_executor_dispatches_real_order_tool(session):
+    tools = {entry.name: entry for entry in build_order_tools(session, "U001")}
+    result = execute_tool(tools, "lookup_order", {"order_id": "O004"})
+    assert result["ok"] is True
+    assert result["data"]["id"] == "O004"
+    assert execute_tool(tools, "lookup_order", {"order_id": "O011"})["error"]["code"] == (
+        "ORDER_NOT_FOUND"
+    )
+
+
+def test_tool_executor_unknown_tool_does_not_invoke_registered_tool():
+    from unittest.mock import Mock
+
+    registered = Mock()
+    assert execute_tool({"lookup_order": registered}, "private_unknown", {}) == {
+        "ok": False,
+        "error": {"code": "UNKNOWN_TOOL", "message": "工具不存在"},
+    }
+    registered.invoke.assert_not_called()
+    registered.get_input_schema.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "arguments", [{}, {"order_id": 123}, {"order_id": "O004", "user_id": "U002"}]
+)
+def test_tool_executor_converts_input_errors_before_invocation(arguments):
+    from unittest.mock import Mock
+
+    from shopcare.schemas.orders import OrderLookupInput
+
+    selected = Mock()
+    selected.get_input_schema.return_value = OrderLookupInput
+    assert execute_tool({"lookup_order": selected}, "lookup_order", arguments) == {
+        "ok": False,
+        "error": {"code": "INVALID_ARGUMENT", "message": "工具参数不合法"},
+    }
+    selected.invoke.assert_not_called()
+
+
+def test_tool_executor_does_not_misclassify_internal_validation_error():
+    from unittest.mock import Mock
+
+    from shopcare.schemas.orders import OrderLookupInput, OrderResponse
+
+    try:
+        OrderResponse.model_validate({})
+    except ValidationError as error:
+        internal_error = error
+    selected = Mock()
+    selected.get_input_schema.return_value = OrderLookupInput
+    selected.invoke.side_effect = internal_error
+    with pytest.raises(ValidationError) as captured:
+        execute_tool({"lookup_order": selected}, "lookup_order", {"order_id": "O004"})
+    assert captured.value is internal_error
+
+
+@pytest.mark.parametrize(
+    "user_id,order_id,expected_code",
+    [
+        ("U001", " O004 ", None),
+        ("U002", "O011", None),
+        ("U001", "O011", "ORDER_NOT_FOUND"),
+        ("U001", "missing", "ORDER_NOT_FOUND"),
+        ("U001", "   ", "INVALID_ARGUMENT"),
+    ],
+)
+def test_order_tool_invocation_and_safe_output(session, user_id, order_id, expected_code):
+    import json
+
+    lookup = build_order_tools(session, user_id)[0]
+    result = lookup.invoke({"order_id": order_id})
+    json.dumps(result, allow_nan=False)
+    if expected_code:
+        assert result == {
+            "ok": False,
+            "error": {
+                "code": expected_code,
+                "message": "订单号不能为空"
+                if expected_code == "INVALID_ARGUMENT"
+                else "订单不存在或不可访问",
+            },
+        }
+    else:
+        assert result["ok"] is True
+        assert result["data"]["id"] == order_id.strip()
+        assert set(result["data"]) == {
+            "id",
+            "status",
+            "total_amount_cents",
+            "created_at",
+            "delivered_at",
+        }
+
+
+def test_order_tool_schema_and_separate_user_bindings(session):
+    first = build_order_tools(session, "U001")[0]
+    second = build_order_tools(session, "U002")[0]
+    assert set(first.args) == {"order_id"}
+    assert first.tool_call_schema.model_json_schema()["required"] == ["order_id"]
+    assert second.invoke({"order_id": "O011"})["ok"] is True
+    # Strict tool inputs reject client-supplied identity before execution.
+    with pytest.raises(ValidationError):
+        first.invoke({"order_id": "O011", "user_id": "U002"})
+    denied = first.invoke({"order_id": "O011"})
+    missing = first.invoke({"order_id": "missing"})
+    assert denied == missing
+    assert denied["error"]["code"] == "ORDER_NOT_FOUND"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {"order_id": 123},
+        {"order_id": None},
+        {"order_id": ""},
+        {"order_id": "x" * 101},
+        {"order_id": "O004", "user_id": "U002"},
+    ],
+)
+def test_order_tool_rejects_invalid_schema_before_query(monkeypatch, arguments):
+    from unittest.mock import Mock
+
+    from shopcare.tools import orders as order_tools
+
+    query = Mock(side_effect=AssertionError("invalid input must not query database"))
+    monkeypatch.setattr(order_tools, "get_order_for_user", query)
+    lookup = build_order_tools(Mock(spec=Session), "U001")[0]
+    with pytest.raises(ValidationError):
+        lookup.invoke(arguments)
+    query.assert_not_called()
+
+
+def test_order_tool_database_failure_is_safe_and_keeps_transaction_ownership(monkeypatch):
+    from unittest.mock import Mock
+
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from shopcare.tools import orders as order_tools
+
+    db_session = Mock(spec=Session)
+    query = Mock(side_effect=SQLAlchemyError("private SQL and connection detail"))
+    monkeypatch.setattr(order_tools, "get_order_for_user", query)
+    lookup = build_order_tools(db_session, "U001")[0]
+    assert lookup.invoke({"order_id": " O004 "}) == {
+        "ok": False,
+        "error": {
+            "code": "TEMPORARILY_UNAVAILABLE",
+            "message": "订单查询暂时不可用，请稍后重试",
+        },
+    }
+    query.assert_called_once_with(db_session, "U001", "O004")
+    db_session.commit.assert_not_called()
+    db_session.rollback.assert_not_called()
+    db_session.close.assert_not_called()
 
 
 @pytest.fixture
