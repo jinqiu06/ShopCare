@@ -1,13 +1,13 @@
 # ShopCare 结构与运行流程
 
-核对日期：2026-11-02。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
+核对日期：2026-11-03。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
 
 ## 当前状态
 
 - 已运行验证：订单 API、词法检索 API、政策导入、向量构建、语义检索和十题真实对照。
 - 单次回答CLI与HTTP入口均已接入并做离线验证。此前CLI真实试跑发现能力承诺和日期问题，最终日期修复仅做一个真实样例回归；本次未新增真实模型HTTP验证。
 - HTTP 搜索仍调用词法检索，已有 answer_order CLI 与 POST /api/orders/{order_id}/answer 回答路由。启动 FastAPI 不会自动运行回答函数。
-- 订单查询/政策检索工具与execute_tool已独立离线验收；LangGraph工具循环、会话记忆、售后申请尚未实现。
+- 订单/政策工具及LangGraph有界工具循环已完成独立离线验收；真实模型Agent试跑、会话记忆和售后申请尚未完成。
 
 ## 目录职责
 
@@ -21,7 +21,8 @@
 | db/ | Base、连接/建表、SQLAlchemy ORM 表 |
 | schemas/ | Pydantic 输入输出结构与校验；不是数据库表 |
 | services/ | 核心函数：订单归属、政策加载/切分/检索、回答与引用校验 |
-| tools/ | 模型工具适配：参数说明、绑定可信身份、调用 services、结构化结果；订单/政策工具和统一入口已独立离线验收，尚未接入 Agent |
+| tools/ | 模型工具适配：参数说明、绑定可信身份、调用services、结构化结果；已供独立Agent图复用 |
+| agent/ | 单次运行状态、模型/工具节点、条件路由和预算终止；未接HTTP或会话持久化 |
 | scripts/ | main() 命令入口，组织配置、资源、事务和输出，复用 services |
 | backend/tests/ | 离线测试，使用模拟模型和临时数据库 |
 | data/policies/ | 八份自编模拟政策 JSON |
@@ -89,7 +90,7 @@ flowchart TD
 
 词法和语义检索仍可独立对照，当前固定回答使用语义路径；图中不表示两者已做混合排序。政策工具复用订单上下文与语义检索，不自行生成回答。
 
-下方全局图展示现有HTTP/CLI入口；独立工具执行图见本页11月2日验收记录，尚未接入Agent。未来Agent编排模块将在对应任务开始时创建。
+下方全局图展示现有HTTP/CLI入口；独立工具与Agent调用图见本页11月2日/3日记录。Agent图已实现并独立离线验证，HTTP/CLI仍使用固定回答链路。
 
 ```mermaid
 flowchart TD
@@ -233,6 +234,10 @@ Set-Location D:\VsCode\ShopCare
 
 | Python 模块（backend/src/shopcare 下） | 当前函数/方法 |
 |---|---|
+| agent/graph.py | `build_agent_graph`, `validate_start`（内部）, `route_after_model`, `route_after_tools` |
+| agent/nodes.py | `build_model_node`, `call_model`（内部）, `build_tool_node`, `call_tools`（内部） |
+| agent/state.py | `AgentState`类型声明，无函数 |
+| agent/__init__.py | 包声明，无函数、无核心调用 |
 | api/dependencies.py | `get_session`, `get_current_user_id` |
 | api/errors.py | `http_error_handler`, `validation_error_handler` |
 | api/health.py | `get_status` |
@@ -427,3 +432,85 @@ flowchart TD
 用户明确要求按领域整理平铺目录。助手移动七个政策服务及对应七个测试模块至policies子目录，文件名去掉重复policy前缀，policy_retriever改为lexical_retriever；原函数与模型不变，业务代码与测试仅更新导入。新增services/policies/__init__.py仅声明包，无函数，不调用核心服务。无新增业务或测试函数；函数清单上方已按新路径更新。
 
 修改引用覆盖API、CLI、固定回答服务、政策工具和测试；原HTTP路径与CLI模块入口不变。不保留旧Python导入兼容层，本仓库外若手工使用旧模块名需要更新。本次不修改数据库或调用真实模型。该段覆盖前文“保留原目录”的历史说明；最终验证结果见当日进度。
+
+## 2026-11-03｜Agent状态声明完成，模型节点待实现
+
+开发者新增agent/state.py的AgentState类，声明messages的add_messages合并规则、model_calls/tool_calls计数、stop_reason。助手验证模块导入、类型字段及两个消息的合并行为，并通过该文件Ruff与格式检查；无外部模型调用，无新增业务函数。AgentState仅声明状态，不调用既有核心函数，不表示图已可运行，当前HTTP/CLI仍使用原固定链路。
+
+接下来计划由开发者新增agent/nodes.py中的build_model_node及内部call_model：绑定既有工具schema并根据当前messages调用对话模型，返回消息增量与调用次数；模型工具请求执行由后续工具节点复用execute_tool。该计划尚未实现，不画入现有运行调用图。
+
+## 2026-11-03｜模型节点初稿审查（预算判断待修正）
+
+开发者新增agent/nodes.py的build_model_node及内部call_model。工厂通过chat_client.bind_tools绑定工具schema；预期模型节点读取消息，调用模型，返回单条消息增量、model_calls+1和running/completed状态。模型节点不执行工具、不直接查数据库。尚未组装Graph或接入HTTP/CLI。
+
+初稿实测：用普通dict状态和模拟客户端调用，预算判断state.model_calls > max.model_calls触发AttributeError，未进入invoke。应使用state["model_calls"] >= max_model_calls，在达到而非超过上限时阻止请求。助手仅整理格式，预算逻辑由开发者修正；模型异常及响应校验尚待实现。本轮无真实模型调用，尚未通过节点行为验收。新增源码函数清单：agent/nodes.py — build_model_node、call_model（内部函数）。
+
+### 模型节点成功路径与预算边界通过
+
+开发者已修正state字典取值及>=预算判断。助手新增backend/tests/agent/test_nodes.py，调用build_model_node并模拟bind_tools/invoke，新增测试函数test_model_node_returns_message_increment_without_mutating_state、test_model_node_exhausted_budget_never_invokes_model，共六项实例覆盖直接回答/工具请求、首轮/最后允许一次调用、达到/超过上限不invoke、返回消息增量且不原地修改状态。六项通过，-W error无警告，相关Ruff与格式检查通过；无数据库或真实模型调用。
+
+运行函数无新增，尚未接图。剩余：异常及非AIMessage/invalid_tool_calls处理；失败请求也需计入调用预算，以尝试次数限制运行。尚未实现的模型/工具循环不计为可用入口。新增测试文件只做验证、不调用核心业务服务，工具执行仍由后续节点复用execute_tool。
+
+### 模型节点失败尝试计数与响应校验通过
+
+开发者在call_model计入调用尝试next_calls，捕获OpenAIError/TimeoutError返回failed；非AIMessage或存在invalid_tool_calls也终止且不追加异常消息。助手新增测试函数test_model_node_failed_attempt_counts_and_does_not_append_response，五项实例覆盖超时、API超时子类、上游服务异常、错误消息类型、无法解析的工具请求。节点测试共11项通过，-W error无警告，相关Ruff与格式检查通过；无真实模型调用。函数调用关系不变，仍未组装Graph。工具节点及条件路由待开发；模型预算配置和初始状态运行边界将在组装入口一并校验。
+
+## 2026-11-03｜工具节点初稿（返回状态待补）
+
+开发者新增agent/nodes.py的build_tool_node及内部call_tools：读取最后AIMessage、检查整批工具预算、循环调用execute_tool并构造对应tool_call_id的ToolMessage。助手整理导入与缩进，仅使用模拟execute_tool试跑一次合法调用：执行器已调用一次，但call_tools末尾未返回状态，实际返回None，工具结果及计数无法写回图状态，尚未通过节点验收。
+
+新增源码函数清单：agent/nodes.py — build_tool_node、call_tools（内部函数）。预期调用关系：call_tools → execute_tool → 已注册工具 → services；ToolMessage加入messages后才交回模型节点。尚未组装Graph，调用编号/输出大小/故障中断及空消息防护待补；本轮无真实工具或模型服务调用。
+
+### 工具节点返回状态与整批预算验证通过
+
+开发者已补齐call_tools返回messages增量、tool_calls按本批派发次数增加和running状态。助手在既有test_nodes.py新增test_tool_node_returns_matching_messages_and_counts_batch、test_tool_node_rejects_entire_batch_over_budget、test_tool_node_rejects_messages_without_tool_requests，共六项实例：两请求的消息ID/JSON结果/顺序、成功和未知工具结果、刚好用完预算、整批超额零执行、无工具请求消息拒绝、不修改原状态。节点文件共17项通过，-W error无警告，相关代码和格式检查通过，无真实工具/模型调用。
+
+仍需处理空messages、缺失/空白/重复工具调用ID、执行异常、基础设施错误终止和输出大小；完整图尚未组装。函数调用图不变，本次仅补已有函数的行为验证。
+
+### 工具节点整批编号预检通过
+
+开发者在读取末条消息前检查空列表，并在执行任何工具前拒绝缺失、非字符串、空白或重复的调用ID。助手新增test_tool_node_rejects_invalid_call_ids_before_any_execution，六项实例覆盖空历史及畸形ID，第二个请求不合法时第一个也不执行，证明预检发生在整批派发前。节点测试共23项通过，-W error无警告，相关Ruff与格式检查通过；无真实外部调用。仅增加验证，无新增运行函数，Graph尚未组装。
+
+### 工具节点失败中断与结果大小限制完成（用户授权助手直接修改）
+
+用户明确要求本次由助手直接完成，并持续授权已讲清方案的同类局部修正；已记录AGENTS.md。助手修改agent/nodes.py的call_tools，不新增运行函数：派发前增加尝试次数，捕获执行/序列化异常并failed终止；非字典结果拒绝；JSON禁止NaN；单条序列化结果按max_output_chars字符限制，超限丢弃该条而不截断JSON；基础设施错误TEMPORARILY_UNAVAILABLE/RETRIEVAL_UNAVAILABLE保留对应ToolMessage后终止余下请求。之前成功的结果与尝试次数保留，原state不变，不输出内部异常详情。
+
+```mermaid
+flowchart TD
+    PRE["整批编号与预算预检"] --> COUNT["计入本次派发尝试"]
+    COUNT --> EXEC["execute_tool → 字典结果 → JSON序列化"]
+    EXEC -->|异常/超长| FAIL["保留先前结果和已尝试次数，failed终止"]
+    EXEC -->|结果合规| MSG["追加对应ID的ToolMessage"]
+    MSG --> INFRA{"基础设施错误？"}
+    INFRA -->|是| FAIL
+    INFRA -->|否| MORE["继续下一请求；整批成功后返回running"]
+```
+
+新增测试函数：test_tool_node_stops_on_unusable_output_and_counts_attempt、test_tool_node_infrastructure_failure_returns_error_and_skips_remaining_tools、test_tool_node_output_size_boundary_is_serialized_character_count、test_tool_node_retains_completed_results_before_later_failure。十二项实例覆盖执行异常/不可序列化/NaN/非字典/超长、两个基础设施错误、中文JSON字符长度刚好/超出边界、后续失败保留此前结果。节点测试共35项通过，-W error无警告，相关Ruff及格式检查通过，无数据库/外部模型调用。
+
+当前失败状态可能保留未获结果的工具请求，后续Graph必须直接END，不得继续发模型或将其当成可恢复会话；当前不支持持久化恢复。字符限制是单条JSON输出限制，不是总token预算或总历史大小限制。仅节点独立验证完成，Graph及条件路由尚未实现，今日范围尚未完成。
+
+
+## 2026-11-03｜有界Agent图离线验收完成
+
+前文逐步记录中的“尚未组装Graph”属于当时状态，以本节及页首为当前状态。开发者实现route_after_model、route_after_tools及build_agent_graph基本连接。助手按局部修正持续授权补正整数配置/工具实例/重名校验、内部validate_start、模型预算耗尽后不再派发工具，以及随预算调整图recursion_limit；新增agent/__init__.py只声明包。编排逻辑复用已验收的节点工厂和工具，不复制业务查询或检索。
+
+```mermaid
+flowchart TD
+    START["graph.invoke：新运行消息 + 零计数 + running"] --> CHECK["validate_start：初始状态校验"]
+    CHECK --> MODEL["call_model：预算 → invoke → AIMessage/请求校验 → 计数"]
+    MODEL --> MR{"route_after_model"}
+    MR -->|completed/failed/budget_exhausted| END["END：返回状态"]
+    MR -->|running| TOOLS["call_tools：模型预算、整批ID与工具预算预检"]
+    TOOLS --> EX["execute_tool → 可信身份绑定工具 → services"]
+    EX --> TM["大小/错误检查 → ToolMessage增量与尝试计数"]
+    TM --> TR{"route_after_tools"}
+    TR -->|failed/budget_exhausted| END
+    TR -->|running| MODEL
+```
+
+完整运行入口：agent.graph.build_agent_graph(...).invoke(state)，配置和示例见README。只接受零计数的新运行，不支持恢复、checkpointer、HTTP会话；失败末态不得直接续传模型。配置在bind_tools前校验，初始状态在invoke模型前校验。输出为AgentState消息历史及终止原因，尚未接PolicyAnswer解析器，不能将completed等同于引用有效或回答正确。
+
+新增测试文件backend/tests/agent/test_graph.py调用build_agent_graph、build_order_tools、build_policy_tools、seed_demo_data/build_engine/init_db等既有函数，用临时数据库及模拟embedding/chat客户端；无真实付费请求。测试辅助函数graph_context、initial_state、tool_request，以及两个局部reply提供模拟响应。新增测试函数：test_graph_selects_next_tool_from_prior_result_and_finishes、test_graph_direct_answer_skips_tools、test_graph_tool_error_is_visible_to_next_model_call、test_graph_model_budget_stops_before_unusable_last_tool_batch、test_graph_tool_budget_stops_without_partial_batch、test_graph_model_failure_ends_without_more_requests、test_graph_tool_failure_never_sends_incomplete_history_to_model、test_graph_rejects_invalid_limits_before_binding_model、test_graph_rejects_duplicate_tool_names、test_graph_rejects_invalid_initial_state_before_model_call、test_graph_large_model_budget_uses_matching_graph_step_limit。纯验证函数不混入运行图。
+
+Agent相关67项、完整后端451项测试通过，-W error无警告；全后端Ruff通过，68个Python文件格式检查通过。已验证模拟模型根据第一次订单结果决定下一政策工具；不是实际模型工具选择评测。本轮无真实模型调用、不写演示库。工具输出上限是单条字符限制，通用failed暂不提供详细事件原因；当前无结构化最终回答校验、真实Agent试跑、会话或记忆。当天有界循环范围收口。

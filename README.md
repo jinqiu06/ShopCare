@@ -1,6 +1,6 @@
 # ShopCare
 
-面向电商售后场景的 Agent 后端项目。当前已完成订单查询、用户范围过滤、商品项查询、分页、模拟数据初始化和政策文件加载校验；已完成词法/语义检索及单次回答 HTTP 接入；只读订单/政策工具及统一执行入口已完成独立离线验证，模型自主工具循环与记忆机制尚未实现。
+面向电商售后场景的 Agent 后端项目。当前已完成订单查询、用户范围过滤、商品项查询、分页、模拟数据初始化和政策文件加载校验；已完成词法/语义检索及单次回答 HTTP 接入；只读工具与LangGraph有界工具循环已完成离线验证；真实模型自主选工具尚未试跑，会话与记忆尚未实现。
 
 ## 当前功能
 
@@ -10,7 +10,7 @@
 - SQLAlchemy 模型包含外键、状态、非负金额和正数数量约束；SQLite 连接显式开启外键检查。
 - 提供可重复运行的模拟数据命令：2 名用户、20 笔订单、40 个商品项；已有记录不覆盖。
 - Pydantic 配置支持根目录 `.env` 和环境变量覆盖，缺少模型 Key 不影响订单查询。
-- 384 项离线测试（2026-11-02）覆盖配置、数据库、事务回滚、初始化、服务与 API。
+- 451 项离线测试（2026-11-03）覆盖配置、数据库、事务回滚、初始化、服务与 API。
 
 ## 环境与安装
 
@@ -106,10 +106,12 @@ backend/
 │   │       ├── embeddings.py # 政策向量生成、保存与读取
 │   │       ├── lexical_retriever.py # 候选查询与词法检索
 │   │       └── semantic_retriever.py # 语义检索
+│   ├── agent/               # state.py 状态、nodes.py 节点、graph.py 有界循环
 │   ├── tools/               # orders.py、policy.py、executor.py：工具适配和派发
 │   └── scripts/             # 初始化、政策导入、索引构建、评测与演示命令
 └── tests/
     ├── api/                  # 健康检查、接口与错误
+    ├── agent/                # 节点与完整循环、预算和失败终止
     ├── core/                 # 配置
     ├── db/                   # 数据约束、回滚与初始化
     └── services/             # 订单、回答、客户端与命令验证
@@ -135,7 +137,7 @@ backend/
 
 模拟订单采用固定 UTC 时间约定，包含 2026-10-30 的签收记录。演示政策判断拟使用固定参照日期 2026-11-02；当前 SQLite 时间响应不带时区标记。
 
-后续依次实现政策加载与切分、检索基线、模型回答、有界工具循环、人工确认、会话恢复、长期记忆和固定案例评测。尚未实现的能力不计入当前功能。
+政策加载/切分、词法/语义检索、固定模型回答及有界工具循环已按阶段完成。后续任务包括真实Agent试跑、多轮会话、人工确认、重启恢复、长期记忆和固定案例评测；尚未实现的能力不计入当前功能。
 
 - [需求与接口约定](docs/requirements.md)
 - [数据模型](docs/data-model.md)
@@ -285,3 +287,44 @@ execute_tool先查工具名称，再单独校验输入，最后invoke。成功�
 
 
 目录整理（2026-11-02）：政策服务统一放在 `services/policies/`，对应测试位于 `backend/tests/services/policies/`。旧的 `shopcare.services.policy_*` 导入已更新为 `shopcare.services.policies.*`，不保留旧路径转发模块。HTTP接口、CLI命令、数据格式和函数名不变；自定义本地代码若使用旧导入，需同步更新。模块输入输出和两条处理流程见 `docs/architecture-flow.md`。
+
+
+## LangGraph有界工具循环（2026-11-03，离线验收）
+
+`agent/state.py`声明消息与计数；`agent/nodes.py`提供模型/工具节点；`agent/graph.py`组装输入校验、模型、工具及终止路由。现有`POST /api/orders/{order_id}/answer`和answer_order CLI仍使用固定回答流程，没有切换到Agent。
+
+在服务端已有对话客户端与可信身份绑定工具的上下文中，可以独立调用：
+
+```python
+from langchain_core.messages import HumanMessage, SystemMessage
+from shopcare.agent.graph import build_agent_graph
+
+agent = build_agent_graph(chat_client, tools)
+result = agent.invoke({
+    "messages": [
+        SystemMessage(content="仅查询模拟订单和政策；事实必须来自工具，不承诺创建申请。"),
+        HumanMessage(content="订单O004的O004-I01耳机坏了，能换货吗？"),
+    ],
+    "model_calls": 0,
+    "tool_calls": 0,
+    "stop_reason": "running",
+})
+```
+
+示例中的chat_client/tools需由服务端创建；Session在运行期间保持打开，user_id与as_of由工具工厂绑定，不能信任模型参数。bind_tools与compile本身不发模型请求；invoke可能调用真实对话与embedding服务。本日仅运行模拟客户端测试，没有真实付费试跑。
+
+默认最多3次对话模型调用尝试、4次工具派发尝试；单条工具JSON最多12000字符。三个配置都严格要求正整数且拒绝bool，重复工具名称被拒绝。初始状态要求非空消息、末条HumanMessage、两个计数为整数0、stop_reason为running。此入口只支持新的单次运行，不支持带非零计数恢复。
+
+模型请求工具后才执行工具，ToolMessage以tool_call_id对应请求；模型可根据结果选择下一工具。未知工具/参数错误作为工具结果供模型修正；数据库/检索基础设施错误、执行或序列化异常、超长输出直接failed结束，不再调用模型。整批预算不足时一个也不派发；对话预算耗尽时也不执行没有后续对话机会的工具。失败尝试计入预算。
+
+终止状态为completed、budget_exhausted或failed。completed只代表模型结束工具循环，不代表事实/引用正确：本版本返回原始消息状态，尚未接入原PolicyAnswer结构及引用解析器，不自动继承固定回答链路的校验。失败/超额时可能保留未配齐结果的工具请求，这种状态不得直接当作可恢复会话继续请求模型。
+
+图设置与模型预算相称的LangGraph步数上限作额外保护；每次工具输出限制是字符数，不是token上限或总历史限制。异常当前只记录通用failed，没有详细诊断事件；工具不自行rollback/close，数据库故障后的Session由外层结束或恢复。
+
+离线验证：
+
+```powershell
+.venv/Scripts/python -m pytest backend/tests/agent -q -W error
+```
+
+Agent测试67项通过，完整后端451项通过。模拟模型依据真实订单工具结果选择政策工具，真实服务/临时数据库产生政策证据后模型结束；验证直接回答、未知/无效工具参数、模型/工具预算、输入校验和失败不再请求模型。不据此宣称真实模型工具选择或生成内容可靠性已验收。
