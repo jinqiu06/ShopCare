@@ -1,6 +1,6 @@
 # ShopCare 结构与运行流程
 
-核对日期：2026-11-03。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
+核对日期：2026-11-04。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
 
 ## 当前状态
 
@@ -8,6 +8,7 @@
 - 单次回答CLI与HTTP入口均已接入并做离线验证。此前CLI真实试跑发现能力承诺和日期问题，最终日期修复仅做一个真实样例回归；本次未新增真实模型HTTP验证。
 - HTTP 搜索仍调用词法检索，已有 answer_order CLI 与 POST /api/orders/{order_id}/answer 回答路由。启动 FastAPI 不会自动运行回答函数。
 - 订单/政策工具及LangGraph有界工具循环已完成独立离线验收；真实模型Agent试跑、会话记忆和售后申请尚未完成。
+- Agent独立演示入口为scripts/run_agent.py：默认只预览，--run才执行图，并在结束后校验PolicyAnswer及引用来源；现有HTTP和answer_order仍走固定链路。
 
 ## 目录职责
 
@@ -237,6 +238,8 @@ Set-Location D:\VsCode\ShopCare
 | agent/graph.py | `build_agent_graph`, `validate_start`（内部）, `route_after_model`, `route_after_tools` |
 | agent/nodes.py | `build_model_node`, `call_model`（内部）, `build_tool_node`, `call_tools`（内部） |
 | agent/state.py | `AgentState`类型声明，无函数 |
+| agent/prompts.py | `build_agent_messages`：构造系统规则与用户消息，供run_agent命令创建图初始状态 |
+| agent/results.py | `collect_policy_evidence`：提取本次成功政策工具证据；`parse_agent_answer`：检查完成状态/最终消息并复用引用校验，已接run_agent，未接HTTP |
 | agent/__init__.py | 包声明，无函数、无核心调用 |
 | api/dependencies.py | `get_session`, `get_current_user_id` |
 | api/errors.py | `http_error_handler`, `validation_error_handler` |
@@ -252,6 +255,7 @@ Set-Location D:\VsCode\ShopCare
 | scripts/evaluate_retrieval.py | `main` |
 | scripts/ingest_policies.py | `main` |
 | scripts/seed.py | `seed_demo_data`, `main` |
+| scripts/run_agent.py | `main`：默认预览、配置/客户端/只读Session、工具和图组装、回答校验与报告 |
 | services/answer_generation.py | `build_answer_messages`, `parse_policy_answer`, `generate_policy_answer`, `get_days_since_delivery` |
 | services/embeddings.py | `cosine_similarity`, `build_embedding_client` |
 | services/llm.py | `build_chat_client` |
@@ -514,3 +518,63 @@ flowchart TD
 新增测试文件backend/tests/agent/test_graph.py调用build_agent_graph、build_order_tools、build_policy_tools、seed_demo_data/build_engine/init_db等既有函数，用临时数据库及模拟embedding/chat客户端；无真实付费请求。测试辅助函数graph_context、initial_state、tool_request，以及两个局部reply提供模拟响应。新增测试函数：test_graph_selects_next_tool_from_prior_result_and_finishes、test_graph_direct_answer_skips_tools、test_graph_tool_error_is_visible_to_next_model_call、test_graph_model_budget_stops_before_unusable_last_tool_batch、test_graph_tool_budget_stops_without_partial_batch、test_graph_model_failure_ends_without_more_requests、test_graph_tool_failure_never_sends_incomplete_history_to_model、test_graph_rejects_invalid_limits_before_binding_model、test_graph_rejects_duplicate_tool_names、test_graph_rejects_invalid_initial_state_before_model_call、test_graph_large_model_budget_uses_matching_graph_step_limit。纯验证函数不混入运行图。
 
 Agent相关67项、完整后端451项测试通过，-W error无警告；全后端Ruff通过，68个Python文件格式检查通过。已验证模拟模型根据第一次订单结果决定下一政策工具；不是实际模型工具选择评测。本轮无真实模型调用、不写演示库。工具输出上限是单条字符限制，通用failed暂不提供详细事件原因；当前无结构化最终回答校验、真实Agent试跑、会话或记忆。当天有界循环范围收口。
+
+## 2026-11-04｜Agent初始消息构造完成
+
+开发者新增agent/prompts.py的build_agent_messages(query, as_of)，仅构造消息，无已有核心函数调用。助手修正HumanMessage误放系统规则导致query丢失的问题，将服务端as_of写入SystemMessage，并补齐JSON字段类型、状态含义及证据/事实边界。返回顺序为SystemMessage、HumanMessage；用户原始问题原样保留。
+
+当前位置：独立调用方 → build_agent_messages → list[BaseMessage]。后续调用方计划将消息写入AgentState交给既有图；目前尚无运行入口接线，不改变graph内部调用图。最终PolicyAnswer解析和引用来源校验尚未实现。
+
+验证：直接导入并断言消息数量、类型、用户问题保留和两个不同日期的正确注入；相关Ruff及格式检查通过。无新增测试文件、外部模型调用或数据库操作。提示词生效程度未做真实模型验证。
+
+## 2026-11-04｜政策工具证据提取完成
+
+用户明确要求助手完成本函数。助手实现agent/results.py的collect_policy_evidence(messages)，不调用已有业务函数；仅使用消息类型、json.loads及SemanticPolicySearchHit.model_validate。独立调用链为：本次可信运行消息 → AIMessage请求编号/工具名登记 → ToolMessage按编号匹配并消费 → 仅政策结果解析 → 成功data逐项校验 → list[SemanticPolicySearchHit]。失败结果和成功空结果不提供证据；损坏JSON、异常包结构、非法证据或未完成请求编号冲突抛ValueError。无对应请求、重复结果、订单结果和普通文本不贡献证据。消费后的编号可在后续请求重新使用，匹配遵循消息顺序。
+
+此函数只处理服务端本次运行产生的可信消息，不对任意客户端提交历史做来源认证；不检查整段对话是否完整或已成功终止，也不替代未来的最终回答/状态校验。尚未接图、HTTP/CLI或parse_policy_answer，不改变现有运行图。
+
+助手新增backend/tests/agent/test_results.py，调用collect_policy_evidence与证据模型校验，13项实例通过，-W error无警告；相关Ruff及格式检查通过。测试函数test_collect_policy_evidence_matches_ids_and_ignores_other_messages、test_collect_policy_evidence_failure_or_empty_result、test_collect_policy_evidence_rejects_malformed_policy_result、test_collect_policy_evidence_rejects_ambiguous_request_ids仅记录于验证说明。无外部模型调用、数据库操作或整库回归。
+
+## 2026-11-04｜Agent最终回答解析独立验收完成
+
+开发者新增agent/results.py的parse_agent_answer(state)。助手按局部修正持续授权，将TypedDict属性访问改为字典取值、统一未定义的messages/last_message变量，并将整次工具执行计数判断改为最终AIMessage的tool_calls/invalid_tool_calls检查。零工具调用的澄清/证据不足回答可正常解析；仅允许stop_reason为completed、消息非空、末条为无工具请求的AIMessage且content为文本。复用collect_policy_evidence及services.answer_generation.parse_policy_answer，返回PolicyAnswer，不新增模型调用或业务查询。
+
+```mermaid
+flowchart TD
+    STATE["本次可信Agent末态"] --> GUARD["parse_agent_answer：completed、非空历史、最终AIMessage、无工具请求、文本"]
+    GUARD --> COLLECT["collect_policy_evidence：匹配成功政策工具结果"]
+    COLLECT --> PARSE["parse_policy_answer：PolicyAnswer字段、非空回答、引用来源/重复、answered必有引用"]
+    PARSE --> ANSWER["PolicyAnswer"]
+```
+
+本图表示可独立调用的解析链；当前HTTP/CLI尚未接入。测试已将build_agent_messages → build_agent_graph.invoke → parse_agent_answer串联，以临时数据库、真实项目工具和模拟外部模型验证；不表示新增正式运行入口。该解析器依赖本次服务端可信图结果，不认证客户端自造历史，不验证所有历史协议、全部业务语义或政策资格；澄清状态涉及政策解释但无引用的旧限制仍然存在。
+
+在既有测试文件补test_parse_agent_answer_accepts_direct_answer_without_tool_calls、test_parse_agent_answer_rejects_unfinished_run、test_parse_agent_answer_rejects_unusable_final_message、test_parse_agent_answer_applies_existing_answer_validation，以及test_graph_final_answer_is_validated_against_actual_policy_results。覆盖正常直答、三种非完成状态、空历史/末条错误/工具请求/非文本、非法JSON/空白回答及工具实际结果对应的有效/伪造/重复/缺失引用。Agent相关99项通过，-W error无警告；相关Ruff及格式检查通过，无真实模型调用或演示数据库修改。本步未新增Python文件。
+
+## 2026-11-04｜独立Agent演示命令
+
+助手新增scripts/run_agent.py的main，调用Settings、get_current_user_id、build_engine、build_embedding_client、build_chat_client、build_order_tools、build_policy_tools、build_agent_messages、build_agent_graph及parse_agent_answer。命令复用核心实现，不新增业务算法。输入为问题、模拟参照日期、预算和可选输出路径；用户身份固定由可信演示依赖提供。默认只做输入/文件存在检查，不打开库、不构造客户端、不写报告。--run才打开Session并启用SQLite query_only，绑定工具、调用图和解析器；Session/Engine由命令关闭/释放，不初始化或写业务数据。
+
+```mermaid
+flowchart TD
+    CLI["run_agent.main：输入、Settings、文件存在检查"] --> RUN{"--run？"}
+    RUN -->|否| PREVIEW["预览身份/问题/日期/预算后退出；不调用模型"]
+    RUN -->|是| CLIENT["构造embedding/chat客户端及Engine"]
+    CLIENT --> SESSION["Session：PRAGMA query_only=ON"]
+    SESSION --> TOOLS["build_order_tools + build_policy_tools：可信身份/日期"]
+    TOOLS --> GRAPH["build_agent_messages → build_agent_graph.invoke"]
+    GRAPH --> STATUS{"completed？"}
+    STATUS -->|否| FAILURE["answer=null；AGENT_RUN_FAILED"]
+    STATUS -->|是| PARSE["parse_agent_answer → collect_policy_evidence → parse_policy_answer"]
+    PARSE -->|格式/引用错误| INVALID["answer=null；ANSWER_INVALID"]
+    PARSE -->|通过| ANSWER["PolicyAnswer"]
+    FAILURE --> REPORT["关闭Session → 输出/可选保存运行报告 → 释放Engine"]
+    INVALID --> REPORT
+    ANSWER --> REPORT
+```
+
+默认3次模型、4次工具派发尝试、单条工具JSON12000字符；问题向量调用不超过工具预算，可能因无候选/无工具请求为0，不伪报实际embedding次数。报告只记录工具请求名/编号、图终态与尝试数、模型返回usage和最终校验答案；无原始订单/消息/私有思考。失败图和回答校验失败报告仍可保存并返回进程码1；输入/配置等图运行前故障只给通用错误。解析失败不重试模型。模型/工具状态与回答的status含义分别保持。
+
+新增测试文件backend/tests/scripts/test_run_agent.py，调用main及已有数据库初始化/模拟数据服务，使用临时库与模拟外部客户端。测试fixture agent_cli_context负责构造环境；测试函数test_preview_never_constructs_clients_opens_database_or_writes_report、test_invalid_input_fails_before_client_construction、test_cli_runs_real_tools_and_validates_final_answer_without_database_writes、test_cli_failed_run_or_answer_is_saved_as_failure、test_missing_database_is_not_created、test_database_session_rejects_accidental_writes（内部attempt_write）验证预览零调用、输入边界、真实工具和图/解析链、错误报告、用量缺失、数据库不自动创建和只读保护。纯验证函数不接运行图。
+
+11月4日最终离线验收：完整后端496项、Agent相关99项、演示命令13项通过，-W error无警告；全后端Ruff及73个Python文件格式检查通过，本地默认预览通过。本轮无真实模型调用、未修改演示数据库；结构与引用来源通过不能替代全部内容审查。当前主调用关系以页首和本节独立CLI图为准，前文“未接入口”等为当时逐步开发记录。

@@ -8,6 +8,8 @@ from openai import OpenAIError
 from sqlalchemy.orm import Session
 
 from shopcare.agent.graph import build_agent_graph
+from shopcare.agent.prompts import build_agent_messages
+from shopcare.agent.results import parse_agent_answer
 from shopcare.db import build_engine, init_db
 from shopcare.db.models import PolicyChunkRecord, PolicyEmbeddingRecord
 from shopcare.scripts.seed import seed_demo_data
@@ -119,6 +121,47 @@ def test_graph_selects_next_tool_from_prior_result_and_finishes(graph_context):
     assert source["model_calls"] == source["tool_calls"] == 0
     assert len(source["messages"]) == 1
     embedding.embed_query.assert_called_once_with("耳机换货")
+
+
+@pytest.mark.parametrize(
+    "citation_ids, valid",
+    [
+        (["digital:v1:000"], True),
+        (["invented:v1:000"], False),
+        (["digital:v1:000", "digital:v1:000"], False),
+        ([], False),
+    ],
+)
+def test_graph_final_answer_is_validated_against_actual_policy_results(
+    graph_context, citation_ids, valid
+):
+    tools, _ = graph_context
+    client = Mock()
+    client.bind_tools.return_value.invoke.side_effect = [
+        tool_request(
+            "search_order_policies",
+            {"order_id": "O004", "item_id": "O004-I01", "query": "耳机换货"},
+        ),
+        AIMessage(
+            content=json.dumps(
+                {
+                    "status": "answered",
+                    "answer": "这是模拟政策说明，目前仅提供咨询，尚未创建申请。",
+                    "citation_chunk_ids": citation_ids,
+                    "limitations": [],
+                }
+            )
+        ),
+    ]
+    source = initial_state()
+    source["messages"] = build_agent_messages("订单O004的O004-I01耳机如何换货？", date(2026, 11, 2))
+    result = build_agent_graph(client, tools).invoke(source)
+    assert result["stop_reason"] == "completed"
+    if valid:
+        assert parse_agent_answer(result).citation_chunk_ids == citation_ids
+    else:
+        with pytest.raises(ValueError):
+            parse_agent_answer(result)
 
 
 def test_graph_direct_answer_skips_tools(graph_context):

@@ -10,7 +10,7 @@
 - SQLAlchemy 模型包含外键、状态、非负金额和正数数量约束；SQLite 连接显式开启外键检查。
 - 提供可重复运行的模拟数据命令：2 名用户、20 笔订单、40 个商品项；已有记录不覆盖。
 - Pydantic 配置支持根目录 `.env` 和环境变量覆盖，缺少模型 Key 不影响订单查询。
-- 451 项离线测试（2026-11-03）覆盖配置、数据库、事务回滚、初始化、服务与 API。
+- 496 项离线测试（2026-11-04）覆盖配置、数据库、事务回滚、初始化、服务、API及Agent演示与回答校验。
 
 ## 环境与安装
 
@@ -106,7 +106,7 @@ backend/
 │   │       ├── embeddings.py # 政策向量生成、保存与读取
 │   │       ├── lexical_retriever.py # 候选查询与词法检索
 │   │       └── semantic_retriever.py # 语义检索
-│   ├── agent/               # state.py 状态、nodes.py 节点、graph.py 有界循环
+│   ├── agent/               # 状态、节点、有界图、prompts.py 消息、results.py 回答校验
 │   ├── tools/               # orders.py、policy.py、executor.py：工具适配和派发
 │   └── scripts/             # 初始化、政策导入、索引构建、评测与演示命令
 └── tests/
@@ -114,6 +114,7 @@ backend/
     ├── agent/                # 节点与完整循环、预算和失败终止
     ├── core/                 # 配置
     ├── db/                   # 数据约束、回滚与初始化
+    ├── scripts/              # Agent演示命令的预览、真实工具链和失败验证
     └── services/             # 订单、回答、客户端与命令验证
         └── policies/         # 政策加载、切分、存储、向量与检索验证
 ```
@@ -247,7 +248,7 @@ backend/
 
 ## 只读工具与统一执行入口（2026-11-02）
 
-开发者实现 `tools/orders.py`、`tools/policy.py`、`tools/executor.py`，复用现有订单与语义检索服务。工具可以独立调用，尚未接入模型自主选工具、LangGraph、HTTP工具路由或多轮会话。目录职责和完整调用图见 `docs/architecture-flow.md`。
+开发者实现 `tools/orders.py`、`tools/policy.py`、`tools/executor.py`，复用现有订单与语义检索服务。工具可以独立调用，也已供下述LangGraph循环和Agent演示命令使用；尚未接入HTTP工具路由或多轮会话。目录职责和完整调用图见 `docs/architecture-flow.md`。
 
 | 工具 | 模型可填写的参数 | 服务端绑定的上下文 | 成功数据 |
 |---|---|---|---|
@@ -317,7 +318,7 @@ result = agent.invoke({
 
 模型请求工具后才执行工具，ToolMessage以tool_call_id对应请求；模型可根据结果选择下一工具。未知工具/参数错误作为工具结果供模型修正；数据库/检索基础设施错误、执行或序列化异常、超长输出直接failed结束，不再调用模型。整批预算不足时一个也不派发；对话预算耗尽时也不执行没有后续对话机会的工具。失败尝试计入预算。
 
-终止状态为completed、budget_exhausted或failed。completed只代表模型结束工具循环，不代表事实/引用正确：本版本返回原始消息状态，尚未接入原PolicyAnswer结构及引用解析器，不自动继承固定回答链路的校验。失败/超额时可能保留未配齐结果的工具请求，这种状态不得直接当作可恢复会话继续请求模型。
+终止状态为completed、budget_exhausted或failed。completed只代表模型结束工具循环，不代表事实/引用正确：图仍返回原始消息状态。11月4日新增的run_agent命令在图结束后调用parse_agent_answer，复用PolicyAnswer结构及引用解析器；直接使用图的调用方也应执行这一步。失败/超额时可能保留未配齐结果的工具请求，这种状态不得直接当作可恢复会话继续请求模型。
 
 图设置与模型预算相称的LangGraph步数上限作额外保护；每次工具输出限制是字符数，不是token上限或总历史限制。异常当前只记录通用failed，没有详细诊断事件；工具不自行rollback/close，数据库故障后的Session由外层结束或恢复。
 
@@ -328,3 +329,26 @@ result = agent.invoke({
 ```
 
 Agent测试67项通过，完整后端451项通过。模拟模型依据真实订单工具结果选择政策工具，真实服务/临时数据库产生政策证据后模型结束；验证直接回答、未知/无效工具参数、模型/工具预算、输入校验和失败不再请求模型。不据此宣称真实模型工具选择或生成内容可靠性已验收。
+
+## 独立Agent演示与回答校验（2026-11-04）
+
+在项目根目录运行：
+
+```powershell
+# 只预览：不创建模型客户端、不打开数据库、不写报告
+.venv/Scripts/python -m shopcare.scripts.run_agent
+# 显式运行：可能产生对话及问题向量用量，保存成功或失败报告
+.venv/Scripts/python -m shopcare.scripts.run_agent --run --output data/private/agent-demo.json
+```
+
+默认问题为“订单O004的O004-I01耳机坏了，能换货吗？”，参照日期固定为模拟日期2026-11-02。可用--query和--as-of修改；身份由服务端固定演示依赖提供U001，不能通过模型工具参数覆盖。预览只检查输入和本地SQLite文件存在，不校验订单、索引、凭据或服务连通性。预览忽略--output。
+
+正式运行需要已有订单、政策片段、匹配模型/维度的政策向量，以及对话和embedding配置；命令不建表、初始化数据或重建索引。复用两个只读工具，Session启用SQLite query_only，退出关闭Session并释放Engine。不会创建售后申请。现有HTTP和answer_order命令仍使用固定回答流程。
+
+默认最多3次对话尝试、4次工具派发尝试，问题向量调用至多4次（实际可能更少或为0）；客户端无自动重试。用--max-model-calls、--max-tool-calls、--max-output-chars调整正整数预算，单条工具JSON默认最多12000字符。预算是次数/单条字符限制，不是总token、总成本或整次运行时限。
+
+调用链为build_agent_messages → build_agent_graph.invoke → parse_agent_answer → collect_policy_evidence/parse_policy_answer。仅允许正常完成、最终模型消息无工具请求、JSON结构正确的回答；引用必须来自本次匹配的成功政策工具结果，不能重复，answered必须有引用。其他状态下出现政策解释却未引用，以及政策解释/业务资格/事实是否正确，仍需内容审查。
+
+图返回后报告包含stop_reason、模型/工具尝试次数、工具请求名称/编号、耗时、PolicyAnswer和各已保留模型响应的原始usage。缺失usage为null，不推算失败尝试或embedding用量，不输出私有思考、原始订单或完整消息历史。失败/预算耗尽为AGENT_RUN_FAILED；completed但回答校验失败为ANSWER_INVALID。两者answer均为null、answer_validated为false，进程返回1；校验成功返回0。图开始前的输入/配置/数据库等错误仅输出通用错误，不生成运行报告。
+
+本轮已完成模拟模型、临时数据库的离线链路验证和本地默认预览，未调用真实模型。answer_validated表示结构与引用来源检查通过，不表示全部语义已验证。新增文件与调用图见docs/architecture-flow.md。

@@ -75,5 +75,4 @@ def build_agent_graph(
     graph.add_conditional_edges("model", route_after_model, {"tools": "tools", END: END})
     graph.add_conditional_edges("tools", route_after_tools, {"model": "model", END: END})
 
-    # LangGraph's step limit is a separate backstop, large enough for the configured budgets.
     return graph.compile().with_config(recursion_limit=2 * max_model_calls + 4)
