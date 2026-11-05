@@ -1,14 +1,15 @@
 # ShopCare 结构与运行流程
 
-核对日期：2026-11-04。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
+核对日期：2026-11-05。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
 
 ## 当前状态
 
 - 已运行验证：订单 API、词法检索 API、政策导入、向量构建、语义检索和十题真实对照。
 - 单次回答CLI与HTTP入口均已接入并做离线验证。此前CLI真实试跑发现能力承诺和日期问题，最终日期修复仅做一个真实样例回归；本次未新增真实模型HTTP验证。
 - HTTP 搜索仍调用词法检索，已有 answer_order CLI 与 POST /api/orders/{order_id}/answer 回答路由。启动 FastAPI 不会自动运行回答函数。
-- 订单/政策工具及LangGraph有界工具循环已完成独立离线验收；真实模型Agent试跑、会话记忆和售后申请尚未完成。
+- 订单/政策工具及LangGraph有界循环已完成离线验收；会话归属、轮次事务及SQLite短期状态已接多轮CLI并做模拟模型跨进程验证。真实模型Agent试跑、会话HTTP、长期记忆和售后申请尚未完成。
 - Agent独立演示入口为scripts/run_agent.py：默认只预览，--run才执行图，并在结束后校验PolicyAnswer及引用来源；现有HTTP和answer_order仍走固定链路。
+- 持久化会话入口为scripts/chat_agent.py：新建或按conversation_id继续，由服务端校验归属、取得内部线程，逐轮保存状态并校验本轮引用；默认只预览。
 
 ## 目录职责
 
@@ -23,7 +24,7 @@
 | schemas/ | Pydantic 输入输出结构与校验；不是数据库表 |
 | services/ | 核心函数：订单归属、政策加载/切分/检索、回答与引用校验 |
 | tools/ | 模型工具适配：参数说明、绑定可信身份、调用services、结构化结果；已供独立Agent图复用 |
-| agent/ | 单次运行状态、模型/工具节点、条件路由和预算终止；未接HTTP或会话持久化 |
+| agent/ | 状态/节点/条件路由、预算终止与带持久化的多轮事务编排；未接会话HTTP |
 | scripts/ | main() 命令入口，组织配置、资源、事务和输出，复用 services |
 | backend/tests/ | 离线测试，使用模拟模型和临时数据库 |
 | data/policies/ | 八份自编模拟政策 JSON |
@@ -58,6 +59,7 @@
 |---|---|---|---|
 | `orders.py` | Session、可信用户、订单号/分页 | ORM订单与商品；只读数据库 | 订单查询和归属规则 |
 | `order_answers.py` | 可信用户、订单/商品、问题、日期、客户端 | 可信订单上下文或PolicyAnswer与AIMessage | 固定回答流程如何串联 |
+| `conversations.py` | Session、可信用户、参照日期或会话编号 | 创建/归属查询、条件开始/结束；由多轮入口管理提交 | 会话归属及执行状态控制 |
 | `answer_generation.py` | 问题、订单事实、证据、日期 | 消息、结构化答案、日期差；可能调用对话模型 | 提示词、引用和回答解析 |
 | `embeddings.py` | Settings或两个向量 | embedding客户端或余弦相似度 | 模型配置和基础向量计算 |
 | `llm.py` | Settings | 对话客户端；构造时不发请求 | 对话模型超时及客户端配置 |
@@ -238,6 +240,7 @@ Set-Location D:\VsCode\ShopCare
 | agent/graph.py | `build_agent_graph`, `validate_start`（内部）, `route_after_model`, `route_after_tools` |
 | agent/nodes.py | `build_model_node`, `call_model`（内部）, `build_tool_node`, `call_tools`（内部） |
 | agent/state.py | `AgentState`类型声明，无函数 |
+| agent/agent.py | `prepare_conversation_turn`, `execute_conversation_graph`, `run_conversation_turn`：短事务开始、可信线程/本轮图执行、独立成功/失败收尾；已接chat_agent CLI |
 | agent/prompts.py | `build_agent_messages`：构造系统规则与用户消息，供run_agent命令创建图初始状态 |
 | agent/results.py | `collect_policy_evidence`：提取本次成功政策工具证据；`parse_agent_answer`：检查完成状态/最终消息并复用引用校验，已接run_agent，未接HTTP |
 | agent/__init__.py | 包声明，无函数、无核心调用 |
@@ -256,11 +259,13 @@ Set-Location D:\VsCode\ShopCare
 | scripts/ingest_policies.py | `main` |
 | scripts/seed.py | `seed_demo_data`, `main` |
 | scripts/run_agent.py | `main`：默认预览、配置/客户端/只读Session、工具和图组装、回答校验与报告 |
+| scripts/chat_agent.py | `main`：默认预览、新建/归属查询、SQLite保存器上下文、run_conversation_turn、结果报告及资源释放 |
 | services/answer_generation.py | `build_answer_messages`, `parse_policy_answer`, `generate_policy_answer`, `get_days_since_delivery` |
 | services/embeddings.py | `cosine_similarity`, `build_embedding_client` |
 | services/llm.py | `build_chat_client` |
 | services/order_answers.py | `get_order_answer_context`, `answer_order_question` |
 | services/orders.py | `get_order_for_user`, `list_orders_for_user`, `get_order_items_for_user` |
+| services/conversations.py | `create_conversation`, `get_conversation_for_user`, `start_conversation_turn`, `finish_conversation_turn`：已供多轮agent入口及chat_agent CLI使用；未接会话HTTP |
 | services/policies/chunker.py | `split_policy` |
 | services/policies/embeddings.py | `embed_policy_chunks`, `save_policy_embeddings`, `load_policy_embeddings` |
 | services/policies/filter.py | `is_policy_effective`, `filter_applicable_policies` |
@@ -578,3 +583,117 @@ flowchart TD
 新增测试文件backend/tests/scripts/test_run_agent.py，调用main及已有数据库初始化/模拟数据服务，使用临时库与模拟外部客户端。测试fixture agent_cli_context负责构造环境；测试函数test_preview_never_constructs_clients_opens_database_or_writes_report、test_invalid_input_fails_before_client_construction、test_cli_runs_real_tools_and_validates_final_answer_without_database_writes、test_cli_failed_run_or_answer_is_saved_as_failure、test_missing_database_is_not_created、test_database_session_rejects_accidental_writes（内部attempt_write）验证预览零调用、输入边界、真实工具和图/解析链、错误报告、用量缺失、数据库不自动创建和只读保护。纯验证函数不接运行图。
 
 11月4日最终离线验收：完整后端496项、Agent相关99项、演示命令13项通过，-W error无警告；全后端Ruff及73个Python文件格式检查通过，本地默认预览通过。本轮无真实模型调用、未修改演示数据库；结构与引用来源通过不能替代全部内容审查。当前主调用关系以页首和本节独立CLI图为准，前文“未接入口”等为当时逐步开发记录。
+
+## 2026-11-05｜Conversation会话模型独立验证
+
+开发者在db/models.py新增Conversation类，声明conversations表：id、user_id、thread_id、as_of、status、created_at、updated_at；user_id外键指向users且有索引。助手补__table_args__单元素元组末尾逗号与thread_id唯一约束。按用户要求，字段保持与文件前面类一致的多行mapped_column结构，保留参数换行与末尾逗号，不压缩为单行。
+
+该模型不新增运行函数、不调用业务服务，不保存消息正文。现有init_db通过Base.metadata.create_all可创建此表；本次仅在临时库验证，没有修改本地演示数据库，也没有接会话服务、Graph checkpoint或HTTP/CLI。当前可验证关系为init_db → 注册ORM模型 → 临时库创建conversations表；真实多轮调用图尚未变化。
+
+复用backend/tests/db/test_db.py的engine fixture，新增测试辅助make_conversation，以及test_conversation_persists_across_connections、test_conversation_rejects_missing_user、test_conversation_thread_id_is_unique_across_users、test_conversation_rejects_invalid_status_or_missing_required_fields。覆盖三个合法状态的重连读取、用户外键、跨用户thread_id唯一和非法状态/必填字段；更新新进程建表测试的表清单。数据库测试49项通过，-W error无警告；相关Ruff及格式检查通过。纯测试函数仅列于本验证说明，不放入业务运行图。
+
+## 2026-11-05｜创建会话服务独立验收
+
+开发者新增services/conversations.py的create_conversation(session, user_id, as_of)。助手仅整理空格/空行、明确user is None判断并补参数尾逗号，保留多行函数签名与Conversation构造。函数不调用已有核心服务，使用Session.get(User, user_id)检查用户，缺失抛LookupError；分别生成两个UUID4作为外部会话id与内部thread_id，使用同一个UTC无时区时间填created_at/updated_at，初始status为ready，session.add/flush后返回Conversation。调用方负责commit/rollback/close，flush会触发Session中其他待写入记录的刷新，不能视为仅写当前对象。
+
+当前独立链：调用方的Session/可信用户/参照日期 → create_conversation → 检查User → 构造Conversation → add/flush → 返回ORM记录。尚无会话查询/状态领取、HTTP/CLI或Graph/checkpoint接线；会话创建不代表已保存聊天历史。未修改演示数据库、未调用外部模型。
+
+助手新增backend/tests/services/test_conversation_service.py，调用create_conversation、build_engine/init_db及模型；fixture conversation_engine仅管理临时库。test_create_conversation_generates_distinct_ids_and_persists验证两名用户的编号/参照日期、UUID4、时间一致和调用方提交后重连读取；test_create_conversation_does_not_commit_callers_transaction验证会话及此前待提交用户均可回滚；test_create_conversation_missing_user_leaves_session_usable验证未知用户无会话写入，调用方仍可继续创建合法会话。3项通过，-W error无警告；相关Ruff及格式检查通过，未重跑完整后端。纯验证函数不进入运行图。
+
+## 2026-11-05｜按用户归属查询会话独立验收
+
+开发者新增services/conversations.py的get_conversation_for_user(session, user_id, conversation_id)，查询同时限制Conversation.user_id及Conversation.id。助手直接修正session.scalars返回结果集合的问题，改用session.scalar返回单个ORM对象或None，移除对结果集合的无效真值判断；保留查询条件多行布局。未知会话、未知用户和他人会话统一None；不按status过滤，不变更会话状态/时间，不自行提交事务。
+
+独立调用链：可信用户身份及会话编号 → get_conversation_for_user → SELECT（编号与归属同时匹配）→ Conversation或None。后续执行入口应在拿到记录后才能访问其thread_id；当前尚未访问checkpoint或接HTTP/CLI，模型不能选择内部thread_id。未新增Python文件或外部调用。
+
+在既有test_conversation_service.py增加test_get_conversation_for_user_returns_record_without_changing_status、test_get_conversation_for_user_hides_foreign_and_missing_records，覆盖ready/running/failed读取及元数据不变、其他用户/未知用户/未知编号；已有回滚测试加入查询操作，验证查询不会提交调用方事务。会话服务9项通过，-W error无警告，相关Ruff及格式检查通过，均用临时库。
+
+## 2026-11-05｜Graph可选checkpoint接线独立验证
+
+开发者为build_agent_graph新增checkpointer: BaseCheckpointSaver | None = None并传入graph.compile，保持原有预算/路由与默认无保存器入口。助手仅整理导入位置、空行及compile/with_config多行缩进。保存器资源由外层提供并管理，图工厂不创建/关闭SQLite连接、不决定会话归属。
+
+在现有test_graph.py增加test_graph_sqlite_checkpoint_survives_reopening_and_appends_new_turn和test_graph_sqlite_checkpoint_separates_thread_histories：临时SQLite保存一次运行，关闭并重新打开saver/重新构图后get_state恢复原消息；使用相同内部thread_id、仅本轮HumanMessage及零计数/running输入，历史追加为两轮且本轮model_calls为1。不同thread_id不读取另一线程历史。图测试38项通过，-W error无警告；相关Ruff及格式检查通过，无外部模型调用或演示数据库修改。
+
+当前可独立使用关系：调用方管理SqliteSaver上下文 → build_agent_graph(checkpointer=saver) → compile(checkpointer) → 图按configurable.thread_id保存/加载。此机制测试不代表应用层安全会话入口已完成；现有CLI仍未传保存器。每轮清零输入由后续可信执行服务负责，不能让客户端覆盖线程编号/状态或直接恢复失败历史。当前没有状态领取/并发门禁或本轮证据范围处理，不能将原始图当作可公开恢复接口。新增checkpoint测试函数仅记录于验证说明，无新增Python文件/运行函数。
+
+## 2026-11-05｜开始会话轮次的条件更新独立验收
+
+开发者新增services/conversations.py的start_conversation_turn(session, user_id, conversation_id)。复用get_conversation_for_user，未知或越权抛LookupError；UPDATE同时匹配会话id、user_id及ready状态，设置running和UTC更新时间，rowcount不为1抛RuntimeError，禁止running/failed会话再次开始。使用synchronize_session=False后refresh ORM对象。助手修正返回数据库CursorResult的问题，改为返回刷新后的Conversation，整理空格和尾逗号，保持多行参数/条件布局。
+
+独立调用链：start_conversation_turn → get_conversation_for_user → 归属错误时LookupError / 条件UPDATE ready→running → 行数检查 → refresh → Conversation。函数不commit/rollback/close；后续外层必须先提交领取事务，再进行模型调用，避免在模型请求期间持有业务库写锁。本步尚未连接Graph、保存器或HTTP/CLI；不会自动从running恢复为ready。
+
+在既有test_conversation_service.py增加test_start_conversation_turn_returns_refreshed_running_record、test_start_conversation_turn_rejects_non_ready_record、test_start_conversation_turn_rejects_missing_or_foreign_record、test_start_conversation_turn_does_not_commit_callers_transaction、test_start_conversation_turn_allows_only_one_concurrent_caller，测试内部辅助lookup_before_race/attempt_start。并发测试使用两个线程的独立Session，两方均先读到ready后再竞争更新，验证恰好一次成功、一次RuntimeError；这是本地SQLite特定竞争场景验证，不宣称全面负载测试。会话服务17项通过，-W error无警告；相关Ruff及格式检查通过，无真实模型调用、仅临时库，未新增Python文件。
+
+## 2026-11-05｜结束会话轮次独立验收
+
+开发者新增services/conversations.py的finish_conversation_turn(session, user_id, conversation_id, *, succeeded)。仅接受bool，复用get_conversation_for_user检查归属、缺失/越权抛LookupError；条件UPDATE仅匹配当前用户的running会话，按succeeded更新为ready/failed及UTC时间，无更新抛RuntimeError。refresh后返回Conversation，由调用方管理事务。助手仅整理空格/缩进、补参数尾逗号，并将结束阶段的状态错误说明明确为“会话当前没有正在执行的轮次”，保持多行参数和SQL布局。
+
+当前独立会话状态闭环为create_conversation → ready → start_conversation_turn → running → finish_conversation_turn(succeeded=True) → ready，或succeeded=False → failed。failed不允许再次start。这里的succeeded由后续可信执行入口在图正常结束且回答解析通过后决定，不能由客户端声称成功。当前没有实际图执行入口调用这一闭环；进程中途崩溃可能留下running，尚无自动恢复/超时解锁或完成操作的幂等重试承诺。
+
+既有test_conversation_service.py新增test_finish_conversation_turn_persists_result_and_controls_next_turn、test_finish_conversation_turn_rejects_non_running_record、test_finish_conversation_turn_rejects_missing_or_foreign_record、test_finish_conversation_turn_rejects_non_boolean_outcome、test_finish_conversation_turn_does_not_commit_callers_transaction。覆盖成功/失败持久化及下一轮准入、ready/failed不被重复结束、越权/不存在、非布尔参数和调用方回滚。会话服务29项通过，-W error无警告；相关Ruff及格式检查通过，无新增Python文件、外部调用或演示库修改。
+
+## 2026-11-05｜准备会话轮次的事务入口独立验收
+
+开发者实际创建agent/agent.py（沿用此路径，先前runner.py为计划文件名，未创建），实现prepare_conversation_turn(engine, user_id, conversation_id) -> tuple[str, date]。助手仅整理空格/空行及多行调用尾逗号。函数自己管理Session与session.begin事务，调用start_conversation_turn，在事务内取得thread_id/as_of，正常退出事务提交running后返回普通值；归属/状态/提交错误向上抛出并由上下文回滚。避免返回已关闭Session中的ORM对象，也避免让业务写事务跨越后续模型请求。
+
+当前独立关系：prepare_conversation_turn → 短Session/事务 → start_conversation_turn → get_conversation_for_user/条件UPDATE → 取出线程/日期 → 提交并关闭Session → tuple。函数尚不加载checkpoint或执行模型；只能由后续会负责结束状态的可信执行入口调用，单独调用成功会保留running，不具备自动解锁或崩溃恢复。
+
+助手新增backend/tests/agent/test_agent.py，调用prepare_conversation_turn、create_conversation和build_engine/init_db；fixture turn_context仅管理临时库。test_prepare_turn_commits_running_and_returns_plain_values、test_prepare_turn_rejects_inaccessible_conversation、test_prepare_turn_rejects_non_ready_conversation、test_prepare_turn_rolls_back_when_commit_fails（内部reject_commit，通过Session.before_commit模拟故障）共7项通过，-W error无警告；相关Ruff及格式检查通过。覆盖提交后新连接可见running、不同用户/未知会话、running/failed拒绝、提交前故障回滚且后续仍可取得执行权。无模型调用或演示数据库修改，尚未接HTTP/CLI。
+
+11月5日多轮提示规则补充：build_agent_messages增加“本轮政策说明重新检索、引用仅来自本轮成功结果”的系统规则。函数调用关系不变，无新增函数。该提示配合计划中的execute_conversation_graph本轮消息切分使用；执行函数和完整多轮入口仍未实现，不能将提示修改视为硬校验已接通。相关消息构造检查及Ruff/格式检查通过，无模型调用。
+
+11月5日导入与文件位置修正：开发者将execute_conversation_graph初稿写入prompts.py，并导入同文件的build_agent_messages，造成自身循环导入。助手保留已写的工具/图构造，将执行函数移至既定agent/agent.py，补齐该文件当前和后续步骤的依赖，修正build_aget_graph拼写及多行缩进；prompts.py仅保留消息构造及其所需导入。两个模块直接导入成功，无模型请求；prompts的完整Ruff、agent的导入顺序及两文件格式检查通过。execute_conversation_graph仍未完成，尚有待使用的导入/局部graph变量，不宣称执行函数完整lint或功能验收；未加载历史、invoke或返回PolicyAnswer，不供运行入口调用。
+
+## 2026-11-05｜多轮Graph执行步骤独立验收完成
+
+用户明确授权补全execute_conversation_graph。继续时源码主体已经完整，本轮保留现有实现并补测试验收，不重复重写核心逻辑。函数验证保存器、非空内部线程及1–1000字符问题，绑定可信用户/参照日期的订单/政策工具，使用build_agent_graph(checkpointer=...)构图。get_state按内部线程读取；snapshot.next非空拒绝继续，已有状态需有消息和用户消息，并仅截取最近HumanMessage起的上一轮历史，通过parse_agent_answer检查。不会用更早轮次证据替上一轮的无效引用兜底。
+
+本轮输入仅有新的HumanMessage，首轮才通过build_agent_messages加入系统消息；调用计数清零、stop_reason设running。图返回完整历史后复制状态字典，按此前history_count切出本轮新增消息，再调用parse_agent_answer。模型可看旧上下文，引用只允许来自本轮匹配的成功工具结果。函数使用而不提交/关闭调用方Session和保存器，不验证外部会话编号归属，不自行start/finish；内部thread_id/user_id/as_of必须由未来的可信外层入口提供。
+
+```mermaid
+flowchart TD
+    CTX["execute_conversation_graph：可信上下文和运行资源"] --> VALID["验证保存器、线程编号和问题"]
+    VALID --> BUILD["build_order_tools/build_policy_tools → build_agent_graph"]
+    BUILD --> SNAP["get_state：读取线程快照"]
+    SNAP --> CHECK["拒绝待执行节点；按上轮自身消息校验历史末态"]
+    CHECK --> INPUT["首轮系统/用户消息，后续仅新HumanMessage；本轮零计数"]
+    INPUT --> INVOKE["graph.invoke：历史加载及新消息追加"]
+    INVOKE --> SLICE["复制结果状态，仅取本轮新增消息"]
+    SLICE --> PARSE["parse_agent_answer → collect_policy_evidence/parse_policy_answer"]
+    PARSE --> ANSWER["PolicyAnswer；异常向外抛出"]
+```
+
+在既有backend/tests/agent/test_agent.py补conversation_graph_context、policy_request、answer_message测试辅助，以及test_execute_graph_restores_history_and_uses_real_tools_for_new_turn、test_execute_graph_rejects_old_citation_and_cannot_reuse_invalid_saved_answer、test_execute_graph_rejects_failed_run_and_blocks_following_model_call、test_execute_graph_rejects_checkpoint_with_pending_node、test_execute_graph_validates_input_before_binding_model。该文件20项通过，-W error无警告；相关Ruff和格式检查通过。
+
+测试使用临时业务/检查点数据库、真实工具/检索服务、模拟chat/embedding，覆盖关闭并重新打开保存器和Engine连接后两轮对话、上下文不重复、每轮计数重置、Session资源保留、实际政策引用、旧引用拒绝及不合规历史续用阻止、对话超时/检索失败/非法JSON/预算终止、未完成节点和输入错误。未做新操作系统进程重启或真实模型效果验证，无演示库写入；本轮未新增Python文件。完整run_conversation_turn的状态提交/异常收尾以及CLI/HTTP入口仍待实现，图执行步骤独立通过不代表外部会话入口完成。
+
+## 2026-11-05｜完整轮次入口与持久化CLI
+
+开发者实现run_conversation_turn初稿。助手按局部修正授权补执行失败后重新raise，避免继续走成功收尾；在prepare前检查保存器和问题，防止无效输入改变会话状态。执行失败时使用新事务finish(False)，再抛出原异常；失败收尾也失败时，为原异常追加可能仍为running的说明。成功收尾放在图执行try/except之外，提交失败直接报错，不二次修改状态或返回有效答案。保存器及Engine由外层提供，函数管理内部短Session，不关闭调用方资源。
+
+```mermaid
+flowchart TD
+    CLI["chat_agent.main：默认预览；--run才创建客户端/打开资源"] --> META["init_db补缺失表；create_conversation或归属查询"]
+    META --> CP["SqliteSaver：默认独立私有文件；继续时需有原检查点"]
+    CP --> RUN["run_conversation_turn：输入检查"]
+    RUN --> PREP["prepare：归属/ready条件更新 → 提交running → 关闭短Session"]
+    PREP --> EXEC["新查询Session：execute_conversation_graph"]
+    EXEC --> HIST["可信thread_id加载历史；追加本轮消息；本轮零计数"]
+    HIST --> GRAPH["Graph模型/工具循环 → 本轮消息切分及引用校验"]
+    GRAPH -->|成功| READY["独立事务finish(True) → ready"]
+    GRAPH -->|异常| FAILED["关闭查询Session；独立事务finish(False) → failed；重抛"]
+    READY --> ANSWER["PolicyAnswer → CLI报告"]
+    FAILED --> ERROR["answer=null；CLI失败报告"]
+```
+
+助手新增scripts/chat_agent.py的main，复用Settings、客户端工厂、get_current_user_id、build_engine/init_db、create_conversation/get_conversation_for_user及run_conversation_turn。默认只检查输入/数据库文件，不创建客户端/打开数据库/写报告；--run补缺失表并创建/继续会话，保存检查点及可选JSON报告。会话编号对外，内部线程只从已验证归属的记录取出；日期创建后固定，恢复禁止覆盖，检查点文件不能与业务库相同。恢复命令发现线程检查点不存在会拒绝继续，状态不变。会话/模型开始前的配置或归属错误只给通用错误；运行错误报告返回1，终态无法读取用null。既有HTTP/answer_order及单次run_agent入口保持原行为。
+
+在test_agent.py新增run_context、first_reply测试辅助和test_run_turn_commits_before_model_and_returns_ready_for_next_turn、test_run_turn_marks_failure_and_blocks_following_request、test_run_turn_rejects_bad_input_before_changing_status、test_run_turn_rejects_inaccessible_conversation_before_checkpoint、test_run_turn_rejects_non_ready_conversation_without_finishing_it、test_run_turn_preserves_original_error_if_failure_status_cannot_be_saved、test_run_turn_does_not_return_answer_or_finalize_twice_if_success_finish_fails。模型回调中另一个连接可读到running并完成独立写事务，验证未持有领取写锁；覆盖输入、归属/状态、超时/检索/JSON/预算/构图失败和两种收尾故障。
+
+新增backend/tests/scripts/test_chat_agent.py，fixture chat_cli_context及测试test_chat_preview_does_not_open_database_or_create_clients、test_chat_cli_creates_and_continues_same_conversation、test_chat_cli_rejects_invalid_input_before_creating_clients、test_chat_cli_failed_answer_reports_failure_and_cannot_continue、test_chat_cli_cannot_continue_another_users_conversation、test_chat_cli_rejects_missing_checkpoint_without_starting_a_fresh_history验证CLI预览、新建/继续、参数、失败、归属及错误检查点路径。
+
+test_agent.py新增test_chat_cli_continues_in_new_python_process：使用subprocess启动两个独立Python解释器，第一轮澄清后进程退出，第二进程用相同conversation_id/检查点库读回两条用户消息，并使用真实政策工具检索、通过本轮引用校验。只替换外部chat/embedding客户端，业务数据库、保存器、CLI与图均真实执行；未调用真实模型或操作演示库。纯测试函数不加入运行图。
+
+边界：这不是任意中断节点恢复或运行中崩溃自动重试；独立会话表与checkpoint库不是一个原子事务，可能留下running，当前人工处理。未做历史裁剪/摘要、长期记忆、会话HTTP或售后申请。先前逐步记录中的“尚未接完整入口/CLI”等以本节与页首当前状态为准。
+
+11月5日最终验收：完整后端586项通过，-W error无警告；Agent编排test_agent.py 38项、会话服务29项、多轮CLI8项；全后端Ruff及79个Python文件格式检查通过。本地默认预览通过，两个独立Python进程的真实CLI/服务/保存器恢复验证通过，外部模型均为Mock，无真实模型效果声明。前文各开发阶段的未完成描述为当时状态，当前以页首及本节完整轮次/CLI关系为准。

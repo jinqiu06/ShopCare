@@ -4,6 +4,7 @@ from unittest.mock import Mock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langgraph.checkpoint.sqlite import SqliteSaver
 from openai import OpenAIError
 from sqlalchemy.orm import Session
 
@@ -327,3 +328,57 @@ def test_graph_large_model_budget_uses_matching_graph_step_limit(graph_context):
     )
     assert result["stop_reason"] == "completed"
     assert (result["model_calls"], result["tool_calls"]) == (14, 13)
+
+
+def test_graph_sqlite_checkpoint_survives_reopening_and_appends_new_turn(tmp_path):
+    path = str(tmp_path / "checkpoints.db")
+    config = {"configurable": {"thread_id": "conversation-thread"}}
+    client = Mock()
+    client.bind_tools.return_value.invoke.return_value = AIMessage(content="具体是什么故障？")
+    with SqliteSaver.from_conn_string(path) as saver:
+        graph = build_agent_graph(client, [], checkpointer=saver)
+        first = graph.invoke(initial_state(), config=config)
+        assert first["stop_reason"] == "completed"
+        assert graph.get_state(config).next == ()
+
+    new_client = Mock()
+    new_client.bind_tools.return_value.invoke.return_value = AIMessage(content="已收到补充信息。")
+    with SqliteSaver.from_conn_string(path) as saver:
+        graph = build_agent_graph(new_client, [], checkpointer=saver)
+        restored = graph.get_state(config).values
+        assert [m.content for m in restored["messages"]] == [
+            "订单O004的O004-I01耳机坏了，能换货吗？",
+            "具体是什么故障？",
+        ]
+        new_turn = initial_state()
+        # 只提交本轮新消息和零计数；旧消息由保存器加载，不能重复提交整段历史。
+        new_turn["messages"] = [HumanMessage(content="左边没声音")]
+        second = graph.invoke(new_turn, config=config)
+        assert [m.content for m in second["messages"]] == [
+            "订单O004的O004-I01耳机坏了，能换货吗？",
+            "具体是什么故障？",
+            "左边没声音",
+            "已收到补充信息。",
+        ]
+        assert second["model_calls"] == 1
+        assert second["tool_calls"] == 0
+        assert second["stop_reason"] == "completed"
+        model_input = new_client.bind_tools.return_value.invoke.call_args.args[0]
+        assert [m.content for m in model_input] == [m.content for m in second["messages"][:-1]]
+
+
+def test_graph_sqlite_checkpoint_separates_thread_histories(tmp_path):
+    client = Mock()
+    client.bind_tools.return_value.invoke.return_value = AIMessage(content="请补充信息。")
+    first_config = {"configurable": {"thread_id": "first-thread"}}
+    second_config = {"configurable": {"thread_id": "second-thread"}}
+    with SqliteSaver.from_conn_string(str(tmp_path / "checkpoints.db")) as saver:
+        graph = build_agent_graph(client, [], checkpointer=saver)
+        graph.invoke(initial_state(), config=first_config)
+        assert graph.get_state(second_config).values == {}
+        second_input = initial_state()
+        second_input["messages"] = [HumanMessage(content="另一个会话的问题")]
+        graph.invoke(second_input, config=second_config)
+        received = client.bind_tools.return_value.invoke.call_args.args[0]
+        assert [m.content for m in received] == ["另一个会话的问题"]
+        assert len(graph.get_state(first_config).values["messages"]) == 2

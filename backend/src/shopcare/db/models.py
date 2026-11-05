@@ -190,3 +190,46 @@ class PolicyEmbeddingRecord(Base):
         JSON,
         nullable=False,
     )
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('ready', 'running', 'failed')",
+            name="ck_conversations_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(50),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
+    thread_id: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        unique=True,
+    )
+    as_of: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )

@@ -1,6 +1,6 @@
 # ShopCare
 
-面向电商售后场景的 Agent 后端项目。当前已完成订单查询、用户范围过滤、商品项查询、分页、模拟数据初始化和政策文件加载校验；已完成词法/语义检索及单次回答 HTTP 接入；只读工具与LangGraph有界工具循环已完成离线验证；真实模型自主选工具尚未试跑，会话与记忆尚未实现。
+面向电商售后场景的 Agent 后端项目。当前已完成订单查询、词法/语义检索、单次回答HTTP、只读工具及LangGraph有界循环；已实现按用户隔离的会话、SQLite持久化短期状态和多轮CLI，并完成模拟模型的跨进程恢复验证。真实模型Agent试跑、会话HTTP、长期记忆和售后申请尚未完成。
 
 ## 当前功能
 
@@ -10,7 +10,7 @@
 - SQLAlchemy 模型包含外键、状态、非负金额和正数数量约束；SQLite 连接显式开启外键检查。
 - 提供可重复运行的模拟数据命令：2 名用户、20 笔订单、40 个商品项；已有记录不覆盖。
 - Pydantic 配置支持根目录 `.env` 和环境变量覆盖，缺少模型 Key 不影响订单查询。
-- 496 项离线测试（2026-11-04）覆盖配置、数据库、事务回滚、初始化、服务、API及Agent演示与回答校验。
+- 586 项离线测试（2026-11-05）覆盖配置、数据库、事务、服务/API、Agent及跨进程会话恢复。
 
 ## 环境与安装
 
@@ -106,7 +106,7 @@ backend/
 │   │       ├── embeddings.py # 政策向量生成、保存与读取
 │   │       ├── lexical_retriever.py # 候选查询与词法检索
 │   │       └── semantic_retriever.py # 语义检索
-│   ├── agent/               # 状态、节点、有界图、prompts.py 消息、results.py 回答校验
+│   ├── agent/               # 状态/节点/图、消息/回答校验、agent.py 多轮执行与事务
 │   ├── tools/               # orders.py、policy.py、executor.py：工具适配和派发
 │   └── scripts/             # 初始化、政策导入、索引构建、评测与演示命令
 └── tests/
@@ -314,7 +314,7 @@ result = agent.invoke({
 
 示例中的chat_client/tools需由服务端创建；Session在运行期间保持打开，user_id与as_of由工具工厂绑定，不能信任模型参数。bind_tools与compile本身不发模型请求；invoke可能调用真实对话与embedding服务。本日仅运行模拟客户端测试，没有真实付费试跑。
 
-默认最多3次对话模型调用尝试、4次工具派发尝试；单条工具JSON最多12000字符。三个配置都严格要求正整数且拒绝bool，重复工具名称被拒绝。初始状态要求非空消息、末条HumanMessage、两个计数为整数0、stop_reason为running。此入口只支持新的单次运行，不支持带非零计数恢复。
+默认最多3次对话模型调用尝试、4次工具派发尝试；单条工具JSON最多12000字符。三个配置都严格要求正整数且拒绝bool，重复工具名称被拒绝。每轮输入要求非空消息、末条HumanMessage、两个计数为整数0、stop_reason为running。默认不带保存器时为独立单次运行；多轮入口通过可选checkpointer加载历史，每轮仅追加新消息并重置调用计数，不直接传回非零计数状态。
 
 模型请求工具后才执行工具，ToolMessage以tool_call_id对应请求；模型可根据结果选择下一工具。未知工具/参数错误作为工具结果供模型修正；数据库/检索基础设施错误、执行或序列化异常、超长输出直接failed结束，不再调用模型。整批预算不足时一个也不派发；对话预算耗尽时也不执行没有后续对话机会的工具。失败尝试计入预算。
 
@@ -352,3 +352,24 @@ Agent测试67项通过，完整后端451项通过。模拟模型依据真实订�
 图返回后报告包含stop_reason、模型/工具尝试次数、工具请求名称/编号、耗时、PolicyAnswer和各已保留模型响应的原始usage。缺失usage为null，不推算失败尝试或embedding用量，不输出私有思考、原始订单或完整消息历史。失败/预算耗尽为AGENT_RUN_FAILED；completed但回答校验失败为ANSWER_INVALID。两者answer均为null、answer_validated为false，进程返回1；校验成功返回0。图开始前的输入/配置/数据库等错误仅输出通用错误，不生成运行报告。
 
 本轮已完成模拟模型、临时数据库的离线链路验证和本地默认预览，未调用真实模型。answer_validated表示结构与引用来源检查通过，不表示全部语义已验证。新增文件与调用图见docs/architecture-flow.md。
+
+## 持久化多轮会话（2026-11-05，离线验收）
+
+```powershell
+# 只预览，不创建会话、检查点、模型客户端或报告
+.venv/Scripts/python -m shopcare.scripts.chat_agent
+# 实际运行首轮，创建会话并返回conversation_id；会产生模型用量
+.venv/Scripts/python -m shopcare.scripts.chat_agent --run --output data/private/chat-first.json
+# 将下面的编号替换为首轮返回的conversation_id，继续同一会话
+.venv/Scripts/python -m shopcare.scripts.chat_agent --run --conversation-id "替换为首轮返回的编号" --query "左边没声音" --output data/private/chat-second.json
+```
+
+默认新会话参照日期2026-11-02，创建时可用--as-of设置；继续会话时固定使用数据库里的日期，禁止覆盖。演示身份固定为服务端U001。检查点默认保存到data/private/agent-checkpoints.db，可用--checkpoint-db指定独立SQLite文件，必须与业务数据库不同；后续继续时使用同一个文件。已有会话找不到对应检查点时，命令拒绝继续，不会悄悄新建空历史。
+
+命令需要已有业务数据库和模拟用户/订单；正式运行会补建缺失表，以保存conversations记录，不生成或重置订单/政策。咨询检索仍需准备政策片段与匹配的向量。只保存会话及图检查点，不执行申请/退款。预览仅检查参数和数据库文件存在，不校验会话、索引或模型连通性。
+
+run_conversation_turn先检查输入，在短事务中取得执行权并提交running；新的查询Session执行图并校验回答；再用独立事务提交ready或failed。归属检查先于检查点访问，running/failed会话不能启动新轮次。成功询问补充信息也回到ready，允许下一轮用户消息；每轮默认3次模型/4次工具尝试，历史保留、计数重置。历史只用于理解上下文，本轮政策引用必须来自本轮重新检索的成功结果。
+
+输出包含conversation_id、会话状态、固定日期、耗时、结构化回答和校验结果。图执行或收尾失败时answer为null、返回码1；状态读取失败记为null，不假装已写入failed。参数/配置/归属等运行前错误仅输出通用错误。报告和检查点放在已忽略的data/private目录，避免提交聊天内容。
+
+已用两个独立Python进程运行真实CLI、业务服务、工具和SQLite保存器，验证“首轮澄清→进程退出→第二轮加载上下文并检索政策”。外部chat/embedding使用Mock，尚未验证真实模型多轮效果。检查点和业务会话表不构成跨数据库原子事务；执行中崩溃或状态提交失败可能留下running，当前需人工检查，不自动解锁/重试。暂未做消息裁剪、摘要、长期偏好记忆、会话HTTP或售后申请。

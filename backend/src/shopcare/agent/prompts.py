@@ -18,6 +18,8 @@ status 只能为 answered、needs_clarification、insufficient_evidence。
 没有相关证据时用 insufficient_evidence。
 answer 为非空中文字符串,citation_chunk_ids 为字符串列表,limitations 为字符串列表。
 引用只能来自本次政策工具成功返回的 chunk.chunk_id;answered 必须有引用。
+多轮对话中，历史消息用于理解上下文；本轮涉及政策说明时重新调用政策检索工具。
+最终引用只能来自本轮成功返回的政策结果，不直接沿用上一轮的引用。
 其他状态涉及政策解释时也应引用。
 检索候选不一定与问题相关，不能将检索分数当作资格判断或置信度。
 不能编造签收日期或经过天数，不能在正文或 limitations 中补充工具未提供的政策条件。

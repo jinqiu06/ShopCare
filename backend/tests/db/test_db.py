@@ -1,11 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from shopcare.db import build_engine, init_db
-from shopcare.db.models import Order, OrderItem, User
+from shopcare.db.models import Conversation, Order, OrderItem, User
 
 
 @pytest.fixture
@@ -144,9 +144,86 @@ def test_init_registers_models_in_fresh_process():
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == [
+        "conversations",
         "order_items",
         "orders",
         "policy_chunks",
         "policy_embeddings",
         "users",
     ]
+
+
+def make_conversation(**overrides):
+    values = dict(
+        id="conversation-1",
+        user_id="U001",
+        thread_id="thread-1",
+        as_of=date(2026, 11, 2),
+        status="ready",
+        created_at=datetime(2026, 11, 5, 10),
+        updated_at=datetime(2026, 11, 5, 10),
+    )
+    values.update(overrides)
+    return Conversation(**values)
+
+
+@pytest.mark.parametrize("status", ["ready", "running", "failed"])
+def test_conversation_persists_across_connections(engine, status):
+    with Session(engine) as session, session.begin():
+        session.add(User(id="U001", display_name="demo user"))
+        session.flush()
+        session.add(make_conversation(status=status))
+    engine.dispose()
+    with Session(engine) as session:
+        record = session.get(Conversation, "conversation-1")
+        assert record.user_id == "U001"
+        assert record.thread_id == "thread-1"
+        assert record.as_of == date(2026, 11, 2)
+        assert record.status == status
+        assert record.created_at == record.updated_at == datetime(2026, 11, 5, 10)
+
+
+def test_conversation_rejects_missing_user(engine):
+    engine.dispose()
+    with Session(engine) as session:
+        session.add(make_conversation())
+        with pytest.raises(IntegrityError):
+            session.flush()
+        session.rollback()
+
+
+def test_conversation_thread_id_is_unique_across_users(engine):
+    with Session(engine) as session, session.begin():
+        session.add_all(
+            [User(id="U001", display_name="first"), User(id="U002", display_name="second")]
+        )
+        session.flush()
+        session.add(make_conversation())
+    with Session(engine) as session:
+        session.add(make_conversation(id="conversation-2", user_id="U002"))
+        with pytest.raises(IntegrityError):
+            session.flush()
+        session.rollback()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"status": "unknown"},
+        {"status": "completed"},
+        {"status": None},
+        {"user_id": None},
+        {"thread_id": None},
+        {"as_of": None},
+        {"created_at": None},
+        {"updated_at": None},
+    ],
+)
+def test_conversation_rejects_invalid_status_or_missing_required_fields(engine, overrides):
+    with Session(engine) as session:
+        session.add(User(id="U001", display_name="demo user"))
+        session.flush()
+        session.add(make_conversation(**overrides))
+        with pytest.raises(IntegrityError):
+            session.flush()
+        session.rollback()

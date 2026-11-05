@@ -1,6 +1,7 @@
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
 from shopcare.agent.nodes import build_model_node, build_tool_node
@@ -27,6 +28,7 @@ def build_agent_graph(
     max_model_calls: int = 3,
     max_tool_calls: int = 4,
     max_output_chars: int = 12000,
+    checkpointer: BaseCheckpointSaver | None = None,
 ):
     for name, value in (
         ("max_model_calls", max_model_calls),
@@ -75,4 +77,8 @@ def build_agent_graph(
     graph.add_conditional_edges("model", route_after_model, {"tools": "tools", END: END})
     graph.add_conditional_edges("tools", route_after_tools, {"model": "model", END: END})
 
-    return graph.compile().with_config(recursion_limit=2 * max_model_calls + 4)
+    return graph.compile(
+        checkpointer=checkpointer,
+    ).with_config(
+        recursion_limit=2 * max_model_calls + 4,
+    )
