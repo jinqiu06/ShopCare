@@ -3,8 +3,92 @@ import json
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from shopcare.agent.results import collect_policy_evidence, parse_agent_answer
+from shopcare.agent.prompts import build_turn_reminder
+from shopcare.agent.results import (
+    collect_policy_evidence,
+    parse_agent_answer,
+    validate_consultation_answer,
+)
+from shopcare.schemas.answers import PolicyAnswer
 from shopcare.schemas.policy_models import SemanticPolicySearchHit
+
+
+@pytest.mark.parametrize("field", ["answer", "limitations"])
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "我们将为您生成换货申请草稿。",
+        "我们可以创建换货申请。",
+        "已为您提交退款申请。",
+        "我们会为您换货。",
+        "正在为您办理售后。",
+    ],
+)
+def test_consultation_boundary_rejects_execution_promises(field, claim):
+    answer = PolicyAnswer(
+        status="needs_clarification",
+        answer=claim if field == "answer" else "请补充故障。",
+        citation_chunk_ids=[],
+        limitations=[claim] if field == "limitations" else [],
+    )
+    with pytest.raises(ValueError, match="不能承诺"):
+        validate_consultation_answer(answer)
+    with pytest.raises(ValueError, match="不能承诺"):
+        parse_agent_answer(
+            {"messages": [AIMessage(content=answer.model_dump_json())], "stop_reason": "completed"}
+        )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "本次仅提供政策咨询，尚未创建任何申请。",
+        "我们不能为您生成换货申请草稿。",
+        "政策中提到生成换货草稿，本系统不具备该能力。",
+        "生成草稿不代表已经创建申请。",
+        "并非我们已经为您提交换货申请。",
+        "没有本轮证据，不能认定符合资格。",
+    ],
+)
+def test_consultation_boundary_allows_negation_and_policy_description(text):
+    validate_consultation_answer(
+        PolicyAnswer(
+            status="needs_clarification", answer=text, citation_chunk_ids=[], limitations=[]
+        )
+    )
+
+
+def test_turn_reminder_excludes_old_evidence_and_does_not_modify_history():
+    hit = {
+        "chunk": {
+            "chunk_id": "old-policy",
+            "policy_id": "digital",
+            "version": "v1",
+            "title": "换货",
+            "category": "数码",
+            "effective_from": "2026-01-01",
+            "effective_until": None,
+            "text": "模拟政策",
+            "start_char": 0,
+            "end_char": 4,
+        },
+        "score": 0.9,
+    }
+    messages = [
+        HumanMessage(content="上轮"),
+        AIMessage(
+            content="",
+            tool_calls=[{"id": "old", "name": "search_order_policies", "args": {}}],
+        ),
+        ToolMessage(content=json.dumps({"ok": True, "data": [hit]}), tool_call_id="old"),
+    ]
+    assert '片段ID为：["old-policy"]' in build_turn_reminder(messages).content
+    messages.append(HumanMessage(content="左边没声音"))
+    original = list(messages)
+    reminder = build_turn_reminder(messages)
+    assert "片段ID为：[]" in reminder.content
+    assert "不能生成草稿" in reminder.content
+    assert messages == original
 
 
 def test_collect_policy_evidence_matches_ids_and_ignores_other_messages():

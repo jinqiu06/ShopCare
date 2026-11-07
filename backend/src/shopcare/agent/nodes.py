@@ -1,11 +1,15 @@
 import json
+from uuid import uuid4
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 from openai import OpenAIError
 
+from shopcare.agent.prompts import build_turn_reminder
+from shopcare.agent.results import collect_policy_evidence, parse_agent_answer
 from shopcare.agent.state import AgentState
+from shopcare.schemas.answers import PolicyAnswer
 from shopcare.tools.executor import execute_tool
 
 
@@ -13,32 +17,86 @@ def build_model_node(
     chat_client: ChatOpenAI,
     tools: list[BaseTool],
     max_model_calls: int = 3,
+    validate_answers: bool = False,
 ):
     model = chat_client.bind_tools(tools)
 
     def call_model(state: AgentState) -> dict:
         if state["model_calls"] >= max_model_calls:
             return {"stop_reason": "budget_exhausted"}
-        next_calls = state["model_calls"] + 1
+        next_calls = state["model_calls"]
+        updates = []
+        require_policy = False
+        while next_calls < max_model_calls:
+            messages = [*state["messages"], *updates]
+            request = [*messages, build_turn_reminder(messages)] if validate_answers else messages
+            next_calls += 1
+            try:
+                active_model = (
+                    chat_client.bind_tools(tools, tool_choice="search_order_policies")
+                    if require_policy
+                    else model
+                )
+                response = active_model.invoke(request)
+            except (OpenAIError, TimeoutError):
+                return {
+                    **({"messages": updates} if updates else {}),
+                    "model_calls": next_calls,
+                    "stop_reason": "failed",
+                }
 
-        try:
-            response = model.invoke(state["messages"])
-        except (OpenAIError, TimeoutError):
+            if not isinstance(response, AIMessage) or response.invalid_tool_calls:
+                return {
+                    **({"messages": updates} if updates else {}),
+                    "model_calls": next_calls,
+                    "stop_reason": "failed",
+                }
+            if validate_answers:
+                # 每次尝试单独记录，避免提供方重复ID让消息合并器覆盖先前候选。
+                response = response.model_copy(update={"id": str(uuid4())})
+            updates.append(response)
+            if validate_answers and not response.tool_calls:
+                start = 0
+                for index, message in enumerate(messages):
+                    if isinstance(message, HumanMessage):
+                        start = index
+                try:
+                    parse_agent_answer(
+                        {
+                            **state,
+                            "messages": [*messages[start:], response],
+                            "stop_reason": "completed",
+                        }
+                    )
+                except ValueError:
+                    if next_calls < max_model_calls:
+                        try:
+                            candidate = PolicyAnswer.model_validate_json(response.content)
+                        except (ValueError, TypeError):
+                            candidate = None
+                        require_policy = (
+                            candidate is not None
+                            and (
+                                candidate.status == "answered" or bool(candidate.citation_chunk_ids)
+                            )
+                            and not collect_policy_evidence(messages[start:])
+                            and any(entry.name == "search_order_policies" for entry in tools)
+                        )
+                        updates.append(
+                            SystemMessage(
+                                content="刚才的候选回答未通过格式、引用或执行承诺校验，未交付用户。"
+                                "请纠正：政策说明必须先检索本轮证据，不能沿用历史引用；"
+                                "本系统不能办理售后，不得承诺生成草稿/申请，也不能声称已执行。"
+                                "仅依据本轮订单事实和政策进行条件性解释。",
+                            )
+                        )
+                        continue
+                    # 保留最后一次候选，由外层同一解析器拒绝；不增加预算。
             return {
+                "messages": updates,
                 "model_calls": next_calls,
-                "stop_reason": "failed",
+                "stop_reason": "running" if response.tool_calls else "completed",
             }
-
-        if not isinstance(response, AIMessage) or response.invalid_tool_calls:
-            return {
-                "model_calls": next_calls,
-                "stop_reason": "failed",
-            }
-        return {
-            "messages": [response],
-            "model_calls": next_calls,
-            "stop_reason": "running" if response.tool_calls else "completed",
-        }
 
     return call_model
 

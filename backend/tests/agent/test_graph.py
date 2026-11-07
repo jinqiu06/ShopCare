@@ -51,7 +51,7 @@ def graph_context(tmp_path):
         embedding.model, embedding.dimensions = "test-model", 2
         embedding.embed_query.return_value = [1.0, 0.0]
         with Session(engine) as session:
-            tools = build_order_tools(session, "U001") + build_policy_tools(
+            tools = build_order_tools(session, "U001", date(2026, 11, 2)) + build_policy_tools(
                 session, embedding, "U001", date(2026, 11, 2)
             )
             yield tools, embedding
@@ -93,6 +93,8 @@ def test_graph_selects_next_tool_from_prior_result_and_finishes(graph_context):
         if len(results) == 1:
             order = json.loads(results[0].content)["data"]
             assert order["id"] == "O004"
+            assert order["days_since_delivery"] == 3
+            assert order["as_of"] == "2026-11-02"
             return tool_request(
                 "search_order_policies",
                 {"order_id": order["id"], "item_id": "O004-I01", "query": "耳机换货"},

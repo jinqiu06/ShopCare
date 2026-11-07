@@ -85,10 +85,10 @@ def main(argv: list[str] | None = None) -> int:
         before = perf_counter()
         with Session(engine) as session:
             session.execute(text("PRAGMA query_only=ON"))
-            tools = build_order_tools(session, user_id) + build_policy_tools(
+            tools = build_order_tools(session, user_id, args.as_of) + build_policy_tools(
                 session, embedding, user_id, args.as_of
             )
-            graph = build_agent_graph(chat, tools, **limits)
+            graph = build_agent_graph(chat, tools, **limits, validate_answers=True)
             result = graph.invoke(
                 {
                     "messages": build_agent_messages(query, args.as_of),

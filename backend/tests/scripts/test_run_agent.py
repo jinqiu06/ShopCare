@@ -180,7 +180,7 @@ def test_cli_failed_run_or_answer_is_saved_as_failure(agent_cli_context, tmp_pat
     report = json.loads(captured.out)
     assert report["answer_validated"] is False
     assert report["answer"] is None
-    assert report["model_calls"] == 1
+    assert report["model_calls"] == (1 if mode in {"timeout", "budget"} else 3)
     assert report["tool_calls"] == 0
     assert report["error_code"] == (
         "AGENT_RUN_FAILED" if mode in {"timeout", "budget"} else "ANSWER_INVALID"
@@ -209,7 +209,7 @@ def test_database_session_rejects_accidental_writes(agent_cli_context, monkeypat
     chat, _, database = agent_cli_context
     original_database = database.read_bytes()
 
-    def attempt_write(session, user_id):
+    def attempt_write(session, user_id, as_of):
         session.execute(text("DELETE FROM orders"))
         raise AssertionError("数据库必须拒绝写入")
 

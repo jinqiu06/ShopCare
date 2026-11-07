@@ -29,6 +29,7 @@ def build_agent_graph(
     max_tool_calls: int = 4,
     max_output_chars: int = 12000,
     checkpointer: BaseCheckpointSaver | None = None,
+    validate_answers: bool = False,
 ):
     for name, value in (
         ("max_model_calls", max_model_calls),
@@ -63,7 +64,7 @@ def build_agent_graph(
     graph.add_node("validate_start", validate_start)
     graph.add_node(
         "model",
-        build_model_node(chat_client, tools, max_model_calls),
+        build_model_node(chat_client, tools, max_model_calls, validate_answers=validate_answers),
     )
     graph.add_node(
         "tools",

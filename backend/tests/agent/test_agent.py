@@ -6,7 +6,7 @@ from datetime import date
 from unittest.mock import Mock
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 from sqlalchemy import event
 from sqlalchemy.orm import Session
@@ -193,7 +193,7 @@ def test_execute_graph_restores_history_and_uses_real_tools_for_new_turn(
             "订单O004的O004-I01耳机坏了，能换货吗？",
             "左边没声音",
         ]
-        assert len([m for m in model_input if isinstance(m, SystemMessage)]) == 1
+        assert len([m for m in model_input if isinstance(m, SystemMessage)]) == 2
         graph = agent.build_agent_graph(second_client, [], checkpointer=saver)
         saved = graph.get_state({"configurable": {"thread_id": thread_id}}).values
         assert len(saved["messages"]) == 7
@@ -228,7 +228,7 @@ def test_execute_graph_rejects_old_citation_and_cannot_reuse_invalid_saved_answe
                 date(2026, 11, 2),
                 "再解释一下",
             )
-        stale_client.bind_tools.return_value.invoke.assert_called_once()
+        assert stale_client.bind_tools.return_value.invoke.call_count == 3
 
         # 即使持久化的stop_reason为completed，也必须重新检查上轮自身的证据范围。
         next_client = Mock()
@@ -238,6 +238,59 @@ def test_execute_graph_rejects_old_citation_and_cannot_reuse_invalid_saved_answe
             )
         next_client.bind_tools.return_value.invoke.assert_not_called()
     embedding.embed_query.assert_called_once()
+
+
+def test_execute_graph_repairs_stale_citation_with_fresh_tools_within_turn_budget(
+    conversation_graph_context,
+):
+    engine, thread_id, embedding, path = conversation_graph_context
+    first_client = Mock()
+    first_client.bind_tools.return_value.invoke.side_effect = [policy_request(), answer_message()]
+    with SqliteSaver.from_conn_string(path) as saver, Session(engine) as session:
+        agent.execute_conversation_graph(
+            session,
+            first_client,
+            embedding,
+            saver,
+            "U001",
+            thread_id,
+            date(2026, 11, 2),
+            "耳机坏了",
+        )
+    client = Mock()
+    request = policy_request("new-policy")
+    request.tool_calls.append(
+        {"id": "new-order", "name": "lookup_order", "args": {"order_id": "O004"}}
+    )
+    # 第一次直接沿用旧引用，应触发纠正；其后才真正检索本轮证据。
+    client.bind_tools.return_value.invoke.side_effect = [
+        answer_message(),
+        request,
+        answer_message(),
+    ]
+    with SqliteSaver.from_conn_string(path) as saver, Session(engine) as session:
+        answer = agent.execute_conversation_graph(
+            session, client, embedding, saver, "U001", thread_id, date(2026, 11, 2), "左边没声音"
+        )
+        assert answer.citation_chunk_ids == ["digital:v1:000"]
+        invoke = client.bind_tools.return_value.invoke
+        assert invoke.call_count == 3
+        assert client.bind_tools.call_args.kwargs == {"tool_choice": "search_order_policies"}
+        assert "片段ID为：[]" in invoke.call_args_list[0].args[0][-1].content
+        assert "未通过" in invoke.call_args_list[1].args[0][-2].content
+        assert '片段ID为：["digital:v1:000"]' in invoke.call_args_list[2].args[0][-1].content
+        saved = saver.get_tuple({"configurable": {"thread_id": thread_id}}).checkpoint[
+            "channel_values"
+        ]
+        assert saved["model_calls"] == 3
+        assert saved["tool_calls"] == 2
+        order_results = [
+            m
+            for m in saved["messages"]
+            if isinstance(m, ToolMessage) and m.tool_call_id == "new-order"
+        ]
+        assert json.loads(order_results[0].content)["data"]["days_since_delivery"] == 3
+    assert embedding.embed_query.call_count == 2
 
 
 @pytest.mark.parametrize("failure", ["timeout", "invalid_json", "budget", "retrieval"])
@@ -268,7 +321,7 @@ def test_execute_graph_rejects_failed_run_and_blocks_following_model_call(
                 date(2026, 11, 2),
                 "查询耳机政策",
             )
-        assert invoke.call_count == (3 if failure == "budget" else 1)
+        assert invoke.call_count == (3 if failure in {"budget", "invalid_json"} else 1)
         next_client = Mock()
         with pytest.raises(ValueError):
             agent.execute_conversation_graph(

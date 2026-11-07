@@ -1,4 +1,5 @@
 import json
+import re
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
@@ -6,6 +7,31 @@ from shopcare.agent.state import AgentState
 from shopcare.schemas.answers import PolicyAnswer
 from shopcare.schemas.policy_models import SemanticPolicySearchHit
 from shopcare.services.answer_generation import parse_policy_answer
+
+
+def validate_consultation_answer(answer: PolicyAnswer) -> None:
+    """拦截明确的执行承诺；不是完整的业务语义判定器。"""
+    action = (
+        r"(?:生成|创建|提交|发起|申请|办理|执行|处理)"
+        r"[^。！？；\n]{0,16}(?:草稿|申请|退款|换货|售后)"
+    )
+    promise = re.compile(
+        rf"(?:我们|我|本系统|系统|平台)(?:现在|马上|立即)?"
+        rf"(?:将|会|可以|可|能|已经|已|正在)(?:直接|立即|马上)?"
+        rf"(?:为您|为你|帮您|帮你|替您|替你)?(?:{action}|退款|换货)"
+        rf"|(?:已经|已|正在)(?:为您|为你|帮您|帮你)?(?:{action}|退款|换货)"
+    )
+    for text in [answer.answer, *answer.limitations]:
+        for match in promise.finditer(text):
+            # “不代表已经创建申请”等否定说明不属于执行承诺。
+            prefix = text[: match.start()]
+            if re.search(
+                r"(?:不代表|不表示|并非|并未|没有|不会|不能|无法|不承诺|不保证)"
+                r"[^。！？；，,\n]{0,8}$",
+                prefix,
+            ):
+                continue
+            raise ValueError("咨询回答不能承诺或声称执行售后操作")
 
 
 def collect_policy_evidence(
@@ -62,4 +88,6 @@ def parse_agent_answer(state: AgentState) -> PolicyAnswer:
     if not isinstance(message.content, str):
         raise ValueError("结果必须为JSON文本")
     evidence = collect_policy_evidence(messages)
-    return parse_policy_answer(message.content, evidence)
+    answer = parse_policy_answer(message.content, evidence)
+    validate_consultation_answer(answer)
+    return answer

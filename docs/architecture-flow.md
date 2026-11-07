@@ -1,13 +1,13 @@
 # ShopCare 结构与运行流程
 
-核对日期：2026-11-05。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
+核对日期：2026-11-07。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
 
 ## 当前状态
 
 - 已运行验证：订单 API、词法检索 API、政策导入、向量构建、语义检索和十题真实对照。
 - 单次回答CLI与HTTP入口均已接入并做离线验证。此前CLI真实试跑发现能力承诺和日期问题，最终日期修复仅做一个真实样例回归；本次未新增真实模型HTTP验证。
 - HTTP 搜索仍调用词法检索，已有 answer_order CLI 与 POST /api/orders/{order_id}/answer 回答路由。启动 FastAPI 不会自动运行回答函数。
-- 订单/政策工具及LangGraph有界循环已完成离线验收；会话归属、轮次事务及SQLite短期状态已接多轮CLI并做模拟模型跨进程验证。真实模型Agent试跑、会话HTTP、长期记忆和售后申请尚未完成。
+- 订单/政策工具及LangGraph有界循环已完成离线验收；会话归属、轮次事务及SQLite短期状态已接多轮CLI并做模拟模型跨进程验证。真实模型已跑通一组两轮样例：第二轮旧引用候选被纠正为本轮检索，明确只提供咨询；内容一致性仍有局限，尚未通过完整效果验收。会话HTTP、长期记忆和售后申请尚未完成。
 - Agent独立演示入口为scripts/run_agent.py：默认只预览，--run才执行图，并在结束后校验PolicyAnswer及引用来源；现有HTTP和answer_order仍走固定链路。
 - 持久化会话入口为scripts/chat_agent.py：新建或按conversation_id继续，由服务端校验归属、取得内部线程，逐轮保存状态并校验本轮引用；默认只预览。
 
@@ -241,8 +241,8 @@ Set-Location D:\VsCode\ShopCare
 | agent/nodes.py | `build_model_node`, `call_model`（内部）, `build_tool_node`, `call_tools`（内部） |
 | agent/state.py | `AgentState`类型声明，无函数 |
 | agent/agent.py | `prepare_conversation_turn`, `execute_conversation_graph`, `run_conversation_turn`：短事务开始、可信线程/本轮图执行、独立成功/失败收尾；已接chat_agent CLI |
-| agent/prompts.py | `build_agent_messages`：构造系统规则与用户消息，供run_agent命令创建图初始状态 |
-| agent/results.py | `collect_policy_evidence`：提取本次成功政策工具证据；`parse_agent_answer`：检查完成状态/最终消息并复用引用校验，已接run_agent，未接HTTP |
+| agent/prompts.py | `build_agent_messages`：构造初始系统规则与用户消息；`build_turn_reminder`：只列本轮证据的临时模型调用提醒，两个Agent CLI启用 |
+| agent/results.py | `collect_policy_evidence`：提取本次成功政策工具证据；`parse_agent_answer`：完成状态/最终消息/本轮引用校验；`validate_consultation_answer`：有限的明确执行承诺拦截，已接两个Agent CLI，未接HTTP |
 | agent/__init__.py | 包声明，无函数、无核心调用 |
 | api/dependencies.py | `get_session`, `get_current_user_id` |
 | api/errors.py | `http_error_handler`, `validation_error_handler` |
@@ -697,3 +697,46 @@ test_agent.py新增test_chat_cli_continues_in_new_python_process：使用subproc
 边界：这不是任意中断节点恢复或运行中崩溃自动重试；独立会话表与checkpoint库不是一个原子事务，可能留下running，当前人工处理。未做历史裁剪/摘要、长期记忆、会话HTTP或售后申请。先前逐步记录中的“尚未接完整入口/CLI”等以本节与页首当前状态为准。
 
 11月5日最终验收：完整后端586项通过，-W error无警告；Agent编排test_agent.py 38项、会话服务29项、多轮CLI8项；全后端Ruff及79个Python文件格式检查通过。本地默认预览通过，两个独立Python进程的真实CLI/服务/保存器恢复验证通过，外部模型均为Mock，无真实模型效果声明。前文各开发阶段的未完成描述为当时状态，当前以页首及本节完整轮次/CLI关系为准。
+
+## 2026-11-07｜Agent订单事实补入签收天数
+
+本次未新增运行函数。build_order_tools(session, user_id, as_of)现绑定服务端参照日期，单次run_agent.main与多轮execute_conversation_graph均显式传入同一as_of；模型只可提供order_id，不能覆盖日期。
+
+```mermaid
+flowchart LR
+    ENTRY["run_agent.main / execute_conversation_graph"] --> FACTORY["build_order_tools：绑定可信user_id与as_of"]
+    FACTORY --> LOOKUP["lookup_order(order_id)"]
+    LOOKUP --> ORDER["get_order_for_user → OrderResponse"]
+    ORDER --> DAYS["get_days_since_delivery(order, as_of)"]
+    DAYS --> RESULT["data：订单字段 + as_of + days_since_delivery"]
+    RESULT --> MODEL["模型直接使用业务计算的天数"]
+```
+
+未知签收返回null，非法先于签收的参照日期返回结构化错误；不判断换货资格，不修改订单，不接入新的HTTP字段。源码函数清单中的build_order_tools/lookup_order新增上述依赖，get_days_since_delivery复用于工具与固定回答两条链路。
+
+新增测试函数test_order_tool_returns_server_computed_delivery_days（4组）和test_order_tool_refuses_reference_date_before_delivery，验证0/3/16日、未知日期、客户端覆盖日期拒绝及非法参照日期。现有图集成测试断言模型下一次调用前已收到3天和服务端日期。相关233项离线测试通过；真实样例首轮日期修正，第二轮沿用旧引用被拒绝。引用来源校验不是全部业务语义校验，真实两轮闭环尚未验收。
+
+## 2026-11-07｜第二轮引用纠正与明确办理承诺拦截
+
+- 新增运行函数仍在原文件：agent/prompts.py的build_turn_reminder读取最近HumanMessage之后的真实政策工具结果，复用collect_policy_evidence，返回本轮允许引用ID及咨询边界的临时SystemMessage。每次模型请求追加，但不把临时提醒写入checkpoint，不修改传入历史。
+- agent/results.py新增validate_consultation_answer，位于parse_policy_answer之后，检查answer和limitations中的明确中文办理承诺/已执行声称，保留否定说明与政策描述。采用有范围的文字模式，不是完整语义或全部语言的能力判定器；固定HTTP回答流程未接此新检查。
+- build_model_node/build_agent_graph增加validate_answers=False选项，保留原始图默认行为；正式run_agent CLI及execute_conversation_graph显式启用。无工具请求的候选先切分本轮消息并parse_agent_answer；校验失败且有剩余额度时保存候选AIMessage及通用SystemMessage反馈，再纠正。每次实际请求都累计model_calls，共用原3次额度，不额外扩大工具预算；超时立即失败。最后仍不合规由外层解析拒绝，run_conversation_turn标failed。
+- 若候选需要政策说明/引用且本轮没有成功证据，下一次纠正用bind_tools(..., tool_choice="search_order_policies")明确要求检索；模型仍负责根据上下文填写参数，execute_tool及政策工具继续校验归属。未绕过归属校验、未自动拼接或猜测订单号。提供方若忽略tool_choice，最终仍无法用旧引用通过校验。
+- 启用校验时，为每次AI候选分配独立消息ID，避免重复提供方ID使add_messages覆盖候选、破坏反馈顺序。无效候选和反馈保留在checkpoint供审查，最终一条必须有效；历史加载时仍重新校验上一轮最终结果。未新增Agent节点、状态字段或Python文件。
+
+```mermaid
+flowchart TD
+    NODE["call_model：原额度内调用"] --> REMINDER["build_turn_reminder：只列本轮引用ID"]
+    REMINDER --> RESPONSE{"模型请求工具？"}
+    RESPONSE -->|是| TOOLS["原工具节点：归属校验/执行/工具预算"]
+    TOOLS --> NODE
+    RESPONSE -->|否| CHECK["parse_agent_answer：本轮证据/结构/validate_consultation_answer"]
+    CHECK -->|通过| FINAL["外层复核 → ready"]
+    CHECK -->|失败且尚有额度| FEEDBACK["保存候选与纠正反馈；无本轮政策时要求调用检索工具"]
+    FEEDBACK --> NODE
+    CHECK -->|额度耗尽仍无效| FAIL["外层拒绝答案 → failed"]
+```
+
+新增验证函数：test_consultation_boundary_rejects_execution_promises、test_consultation_boundary_allows_negation_and_policy_description、test_turn_reminder_excludes_old_evidence_and_does_not_modify_history、test_model_node_corrects_execution_promise_within_original_budget、test_execute_graph_repairs_stale_citation_with_fresh_tools_within_turn_budget。覆盖正文/limitations承诺、否定表述、旧证据排除、超时/持续无效、真实临时工具与关闭重开保存器后的三次额度内纠正；更新原测试对最多3次纠正的预期。这些仅属于验证，不是新增业务入口。
+
+真实回归先确认仅提示仍会连续沿用旧引用并被拦截；增加明确tool_choice后，同一会话的两个独立CLI进程均返回ready，首轮澄清、次轮answered。次轮3次模型调用、1次成功的本轮search_order_policies，引用digital-exchange:v2:000；签收天数为3，明确不能创建/提交申请。该样例不证明普遍准确率；原始答复仍有政策未提供的“平台审核”措辞，对质量问题的表述也应继续保持条件性，未宣称完整内容验收。

@@ -2,10 +2,54 @@ from unittest.mock import Mock
 
 import pytest
 from httpx import Request
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from openai import APITimeoutError, OpenAIError
 
 from shopcare.agent.nodes import build_model_node, build_tool_node
+from shopcare.agent.results import parse_agent_answer
+
+
+@pytest.mark.parametrize("failure", ["corrected", "timeout", "invalid_again"])
+def test_model_node_corrects_execution_promise_within_original_budget(failure):
+    import json
+
+    payload = {
+        "status": "needs_clarification",
+        "answer": "我们将为您生成换货申请草稿。",
+        "citation_chunk_ids": [],
+        "limitations": [],
+    }
+    invalid = AIMessage(content=json.dumps(payload, ensure_ascii=False))
+    valid = AIMessage(content=json.dumps({**payload, "answer": "请补充故障，本次仅提供咨询。"}))
+    client = Mock()
+    invoke = client.bind_tools.return_value.invoke
+    invoke.side_effect = [
+        invalid,
+        TimeoutError("private upstream detail")
+        if failure == "timeout"
+        else invalid
+        if failure == "invalid_again"
+        else valid,
+    ]
+    state = {
+        "messages": [HumanMessage(content="耳机坏了")],
+        "model_calls": 1,
+        "tool_calls": 0,
+        "stop_reason": "running",
+    }
+    result = build_model_node(client, [], validate_answers=True)(state)
+    assert invoke.call_count == 2
+    assert result["model_calls"] == 3
+    assert len(state["messages"]) == 1
+    assert state["model_calls"] == 1
+    assert any(isinstance(m, SystemMessage) and "未通过" in m.content for m in result["messages"])
+    if failure == "timeout":
+        assert result["stop_reason"] == "failed"
+    elif failure == "invalid_again":
+        with pytest.raises(ValueError, match="不能承诺"):
+            parse_agent_answer({**state, **result})
+    else:
+        assert parse_agent_answer({**state, **result}).answer == "请补充故障，本次仅提供咨询。"
 
 
 @pytest.mark.parametrize(

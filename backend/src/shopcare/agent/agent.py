@@ -56,13 +56,18 @@ def execute_conversation_graph(
         raise ValueError("问题必须为1至1000个字符")
     query = query.strip()
 
-    tools = build_order_tools(session, user_id) + build_policy_tools(
+    tools = build_order_tools(session, user_id, as_of) + build_policy_tools(
         session,
         embedding_client,
         user_id,
         as_of,
     )
-    graph = build_agent_graph(chat_client, tools, checkpointer=checkpointer)
+    graph = build_agent_graph(
+        chat_client,
+        tools,
+        checkpointer=checkpointer,
+        validate_answers=True,
+    )
     config = {"configurable": {"thread_id": thread_id}}
     snapshot = graph.get_state(config)
     if snapshot.next:

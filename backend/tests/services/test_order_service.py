@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -22,7 +24,7 @@ def test_policy_tool_executor_real_ownership_and_retrieval(
     from datetime import date
 
     embedding, chat = answer_clients
-    entries = build_order_tools(session, "U001") + build_policy_tools(
+    entries = build_order_tools(session, "U001", date(2026, 11, 2)) + build_policy_tools(
         session, embedding, "U001", date(2026, 11, 2)
     )
     tools = {entry.name: entry for entry in entries}
@@ -134,7 +136,7 @@ def test_policy_tool_failures_are_safe_and_never_call_chat(
 
 
 def test_tool_executor_dispatches_real_order_tool(session):
-    tools = {entry.name: entry for entry in build_order_tools(session, "U001")}
+    tools = {entry.name: entry for entry in build_order_tools(session, "U001", date(2026, 11, 2))}
     result = execute_tool(tools, "lookup_order", {"order_id": "O004"})
     assert result["ok"] is True
     assert result["data"]["id"] == "O004"
@@ -202,7 +204,7 @@ def test_tool_executor_does_not_misclassify_internal_validation_error():
 def test_order_tool_invocation_and_safe_output(session, user_id, order_id, expected_code):
     import json
 
-    lookup = build_order_tools(session, user_id)[0]
+    lookup = build_order_tools(session, user_id, date(2026, 11, 2))[0]
     result = lookup.invoke({"order_id": order_id})
     json.dumps(result, allow_nan=False)
     if expected_code:
@@ -224,12 +226,14 @@ def test_order_tool_invocation_and_safe_output(session, user_id, order_id, expec
             "total_amount_cents",
             "created_at",
             "delivered_at",
+            "as_of",
+            "days_since_delivery",
         }
 
 
 def test_order_tool_schema_and_separate_user_bindings(session):
-    first = build_order_tools(session, "U001")[0]
-    second = build_order_tools(session, "U002")[0]
+    first = build_order_tools(session, "U001", date(2026, 11, 2))[0]
+    second = build_order_tools(session, "U002", date(2026, 11, 2))[0]
     assert set(first.args) == {"order_id"}
     assert first.tool_call_schema.model_json_schema()["required"] == ["order_id"]
     assert second.invoke({"order_id": "O011"})["ok"] is True
@@ -240,6 +244,33 @@ def test_order_tool_schema_and_separate_user_bindings(session):
     missing = first.invoke({"order_id": "missing"})
     assert denied == missing
     assert denied["error"]["code"] == "ORDER_NOT_FOUND"
+
+
+@pytest.mark.parametrize(
+    "order_id,as_of,expected",
+    [
+        ("O004", date(2026, 10, 30), 0),
+        ("O004", date(2026, 11, 2), 3),
+        ("O004", date(2026, 11, 15), 16),
+        ("O001", date(2026, 11, 2), None),
+    ],
+)
+def test_order_tool_returns_server_computed_delivery_days(session, order_id, as_of, expected):
+    lookup = build_order_tools(session, "U001", as_of)[0]
+    result = lookup.invoke({"order_id": order_id})
+    assert result["ok"] is True
+    assert result["data"]["as_of"] == as_of.isoformat()
+    assert result["data"]["days_since_delivery"] == expected
+    with pytest.raises(ValidationError):
+        lookup.invoke({"order_id": order_id, "as_of": "2030-01-01"})
+
+
+def test_order_tool_refuses_reference_date_before_delivery(session):
+    lookup = build_order_tools(session, "U001", date(2026, 10, 29))[0]
+    result = lookup.invoke({"order_id": "O004"})
+    assert result["ok"] is False
+    assert result["error"]["code"] == "INVALID_REFERENCE_DATE"
+    assert "data" not in result
 
 
 @pytest.mark.parametrize(
@@ -260,7 +291,7 @@ def test_order_tool_rejects_invalid_schema_before_query(monkeypatch, arguments):
 
     query = Mock(side_effect=AssertionError("invalid input must not query database"))
     monkeypatch.setattr(order_tools, "get_order_for_user", query)
-    lookup = build_order_tools(Mock(spec=Session), "U001")[0]
+    lookup = build_order_tools(Mock(spec=Session), "U001", date(2026, 11, 2))[0]
     with pytest.raises(ValidationError):
         lookup.invoke(arguments)
     query.assert_not_called()
@@ -276,7 +307,7 @@ def test_order_tool_database_failure_is_safe_and_keeps_transaction_ownership(mon
     db_session = Mock(spec=Session)
     query = Mock(side_effect=SQLAlchemyError("private SQL and connection detail"))
     monkeypatch.setattr(order_tools, "get_order_for_user", query)
-    lookup = build_order_tools(db_session, "U001")[0]
+    lookup = build_order_tools(db_session, "U001", date(2026, 11, 2))[0]
     assert lookup.invoke({"order_id": " O004 "}) == {
         "ok": False,
         "error": {
