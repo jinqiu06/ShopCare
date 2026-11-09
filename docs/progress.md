@@ -445,3 +445,37 @@
 - 最终完整后端647项通过（30.51秒，-W error），全后端Ruff通过，79个Python文件格式检查通过。初次相关集成仅有一处测试仍把内部五字段与对外四字段直接比较，修正断言后全量通过；没有放宽生产校验。
 - 新版真实试跑请求在执行前被自动审批拒绝，理由是需要用户明确同意本次模拟订单/故障/政策文本发送到具体模型目的地；未绕过拒绝，也未创建这次真实会话。只读核对配置：对话qwen-plus、向量text-embedding-v4，目的地均dashscope.aliyuncs.com，不读取或展示密钥。等待用户确认后才做新版两轮真实验收，11月7日旧格式样例不计作本次通过。
 - 本轮运行验证仅临时数据库和Mock外部模型，未修改演示订单/政策/向量或已有会话。摘录真并不证明解释语义正确，澄清回答不带引用却解释政策、无依据推论及引用截取语义仍不宣称已解决。会话HTTP、长期记忆和售后执行不在本次范围。
+
+## 11月9日后续推进｜剩余模块核对与会话HTTP第一步
+
+- 按当前源码、requirements.md和开发规划核对：已有订单/API、RAG数据导入/切分/存储/向量/检索、只读工具、有界LangGraph、多轮CLI、持久化短期状态及摘录校验。最新提交bf773e0，工作区在本条计划写入前干净；647项是上一轮离线验收结果，本次未重复运行。
+- 距离原售后工单Agent完整目标，主要剩余：会话HTTP（创建/查询/消息推进）、售后草稿/确认/取消/幂等提交、历史增长控制与长期记忆、故障恢复/追踪、固定真实效果评测与交付。独立物流详情接口也未实现；CI文件已有，不将CI本身算作完全未开发；容器化/MCP可按原规划后置。当前用户仍是演示U001，尚无真实登录，不能宣称生产可用。
+- 本次先限定创建会话和按归属查询两个HTTP接口；复用create_conversation/get_conversation_for_user与现有可信演示用户依赖，不运行Graph、不请求模型、不提供内部thread_id。验收边界为创建返回ready、查本人记录、越权/不存在统一404、非法输入422以及无模型调用。消息推进入口后续单独接资源和checkpoint边界，不在本小步扩展长期记忆或售后写操作。
+- 第一个学习任务计划新增schemas/conversations.py，仅定义ConversationCreateRequest(as_of: date)，extra=forbid。该文件尚未创建，不调用核心函数；开发者完成后再增加响应模型/路由并由助手补测试。客户端不提交user_id、thread_id或status。
+- 原文摘录新版真实试跑仍等待用户对阿里云百炼具体目的地的数据发送确认；本次没有将“继续开发”解释为该项授权，不重试被拒绝的外部模型请求。
+
+### ConversationCreateRequest请求模型小步核对
+
+- 开发者新建schemas/conversations.py，ConversationCreateRequest仅接收必填as_of，extra=forbid。模块只定义数据结构，无运行函数或业务服务调用。
+- 直接核验日期解析成功；缺日期、非法日期和额外user_id/thread_id/status拒绝。相关Ruff及格式检查通过；本步未增加测试文件、未运行模型或修改数据库。
+- 下一步计划在同文件添加ConversationResponse，字段id/status/as_of，from_attributes=True，以便从ORM记录读取允许公开的属性。thread_id和user_id不进入响应。模型尚未实现，路由尚未接入。
+
+### ConversationResponse响应模型小步核对
+
+- 开发者在schemas/conversations.py完成ConversationResponse，from_attributes=True，公开id/status/as_of，状态限ready/running/failed。直接以未落库Conversation对象验证属性转换，JSON仅三个字段，不暴露user_id/thread_id；未知状态拒绝。相关格式/Ruff检查通过，无模型请求或数据库写入。
+- 下一小步计划由开发者新建api/conversations.py，提供POST /api/conversations，调用已有create_conversation；请求Session由依赖提供，路由短事务提交前构造ConversationResponse，成功提交后返回201。模块尚未创建，main尚未注册，不计为可用接口。随后助手审查并按授权补错误处理/测试，再连接按归属查询。
+
+### 创建会话HTTP接口小步验收
+
+- 开发者新增api/conversations.py的create_conversation_api，复用create_conversation，Session.begin短事务内构造三字段响应、成功提交后返回201。助手按已说明方案补LookupError→404 USER_NOT_FOUND、SQLAlchemyError→503 CONVERSATION_UNAVAILABLE，并在main注册router。输入错误复用既有422处理器，不泄漏SQL/内部线程/用户字段。
+- 助手新增backend/tests/api/test_conversation_api.py，使用临时SQLite、实际lifespan/依赖/服务验证路由。新增client测试夹具及test_create_conversation_commits_and_returns_only_public_fields、test_create_conversation_rejects_invalid_body_before_service、test_create_conversation_missing_trusted_user_returns_safe_404、test_create_conversation_database_failure_rolls_back_and_does_not_leak_details；故障辅助fail_after_flush/fail_commit仅用于模拟数据库错误，不进入运行图。
+- 新文件10组创建测试；所有API和会话服务测试合计108项通过（-W error），相关格式/Ruff检查通过。验证独立连接提交可见、可信身份不被header/query覆盖、422不进入服务、flush后故障/提交故障均回滚且后续请求可用。没有模型请求、演示数据库写入或新增业务服务算法。
+- 创建接口已可通过注册后的FastAPI调用；不创建checkpoint、不开启Graph，当前仍缺按归属查询和发送消息路由。下一小步由开发者实现GET /api/conversations/{conversation_id}，复用get_conversation_for_user，缺失/越权统一404，数据库失败503，不写库。今日约定的创建/查询小闭环尚未最终收口。
+
+### 创建与查询会话HTTP小闭环
+
+- 开发者完成api/conversations.py的read_conversation，复用get_conversation_for_user并将None统一映射404 CONVERSATION_NOT_FOUND。助手整理空格/尾逗号并补SQLAlchemyError→503 CONVERSATION_UNAVAILABLE，保留多行参数与错误结构。查询不提交或修改状态，内部thread_id及user_id不在响应中。
+- 在既有test_conversation_api.py新增test_read_conversation_returns_owned_record_without_changing_it（两个用户×三种状态）、test_read_conversation_missing_and_unowned_return_identical_404（两个请求身份）、test_read_conversation_database_failure_returns_safe_503，共9组。配合先前创建10组，共19组会话API测试；不通过增加业务模块或模型调用完成查询。
+- 今日约定创建/按归属查询两个HTTP接口已实现，查询测试覆盖ready/running/failed均可读取、状态及updated_at不变、header/query不覆盖可信身份、缺失/越权同404、数据库异常不泄漏。main、README和architecture-flow同步实际入口。发送消息推进Graph仍属后续任务，不计入本次HTTP完成项；真实模型试跑仍未获目的地确认，本轮不尝试外部请求。
+- 最终全后端666项通过（30.61秒，-W error），全后端Ruff通过；最终格式检查以实际输出为准。仅在临时测试库验证HTTP，未触碰本地演示数据库，也未请求模型。测试临时目录在结束后清理，按持续授权检查差异/敏感信息后提交推送，本次创建/查询小闭环收口。
+- 最终格式检查82个Python文件全部通过。

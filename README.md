@@ -10,7 +10,7 @@
 - SQLAlchemy 模型包含外键、状态、非负金额和正数数量约束；SQLite 连接显式开启外键检查。
 - 提供可重复运行的模拟数据命令：2 名用户、20 笔订单、40 个商品项；已有记录不覆盖。
 - Pydantic 配置支持根目录 `.env` 和环境变量覆盖，缺少模型 Key 不影响订单查询。
-- 647 项离线测试（2026-11-09）覆盖配置、数据库、事务、服务/API、Agent、跨进程恢复、原文摘录校验及预算内回答纠正。
+- 666 项离线测试（2026-11-09）覆盖配置、数据库、事务、服务/API、Agent、跨进程恢复、原文摘录校验及预算内回答纠正。
 
 ## 环境与安装
 
@@ -54,6 +54,8 @@ Copy-Item .env.example .env
 | GET | `/api/orders/{order_id}` | 查询当前用户的指定订单 |
 | GET | `/api/orders/{order_id}/items` | 按需查询该订单商品项 |
 | POST | `/api/orders/{order_id}/answer` | 对选中商品进行单次政策咨询 |
+| POST | `/api/conversations` | 创建会话，固定模拟参照日期；当前尚未接消息推进 |
+| GET | `/api/conversations/{conversation_id}` | 按当前用户归属读取会话状态和参照日期 |
 
 limit 默认 20，范围 1–100；offset 默认 0，最小 0。参数不合法时返回 422。列表响应仍为数组，不包含总条数。
 

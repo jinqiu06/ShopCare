@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from shopcare.api.conversations import router as conversations_router
 from shopcare.api.errors import http_error_handler, validation_error_handler
 from shopcare.api.health import router as health_router
 from shopcare.api.orders import router as orders_router
@@ -31,3 +32,4 @@ app.add_exception_handler(RequestValidationError, validation_error_handler)
 app.include_router(health_router)
 app.include_router(orders_router)
 app.include_router(policies_router)
+app.include_router(conversations_router)

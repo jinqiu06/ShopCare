@@ -11,6 +11,7 @@
 - Agent独立演示入口为scripts/run_agent.py：默认只预览，--run才执行图，并在结束后校验PolicyAnswer及引用来源；现有HTTP和answer_order仍走固定链路。
 - 持久化会话入口为scripts/chat_agent.py：新建或按conversation_id继续，由服务端校验归属、取得内部线程，逐轮保存状态并校验本轮引用；默认只预览。
 - Agent内部回答现在要求policy_quotes原文摘录：本轮来源、连续原文和引用编号覆盖均校验后，仍返回四字段PolicyAnswer；已做离线验证，11月9日新版真实模型试跑待确认。旧会话缺少此字段时CLI提示新建并保留原历史；固定HTTP回答链路未接此新检查。
+- 会话HTTP已注册POST /api/conversations和GET /api/conversations/{conversation_id}，提供创建及按归属查询，仅公开id/status/as_of，不调用模型或创建checkpoint。消息路由尚未接入；不存在/越权统一404，数据库错误503。
 
 ## 目录职责
 
@@ -246,6 +247,7 @@ Set-Location D:\VsCode\ShopCare
 | agent/results.py | `collect_policy_evidence`：提取本次成功政策工具证据；`parse_agent_answer`：完成状态/最终消息/本轮引用校验；`validate_consultation_answer`：有限的明确执行承诺拦截；`validate_policy_quotes`：片段编号/连续原文摘录校验；`parse_agent_policy_answer`：内部JSON/摘录覆盖校验后返回PolicyAnswer；均已接两个Agent CLI，未接固定HTTP |
 | agent/__init__.py | 包声明，无函数、无核心调用 |
 | api/dependencies.py | `get_session`, `get_current_user_id` |
+| api/conversations.py | `create_conversation_api`：短事务创建；`read_conversation`：复用get_conversation_for_user按归属查询；均返回三字段ConversationResponse，已注册main |
 | api/errors.py | `http_error_handler`, `validation_error_handler` |
 | api/health.py | `get_status` |
 | api/orders.py | `read_orders`, `read_order`, `read_order_items`, `answer_order` |
@@ -801,3 +803,45 @@ flowchart TD
 上述纠正适用于整个解析链抛出的ValueError，额度耗尽后仍拒绝无效答案。节点为决定tool_choice而读取候选四字段时允许排除内部摘录字段，不代表最终回答可省略摘录；最终仍由parse_agent_answer严格验收。chat_agent对归属已验证的ready旧会话预检，历史最终JSON缺policy_quotes时提示新建且不领取/改状态、不改历史；其他不合规历史仍由底层重验拒绝。
 
 新增验证函数test_graph_corrects_invalid_excerpt_with_current_evidence_within_budget、test_chat_cli_refuses_legacy_answer_before_starting_and_preserves_history；扩展既有失败状态验证覆盖持续错误摘录。全量647项通过，Ruff与79文件格式检查通过。新版真实模型试跑被自动审批在执行前拦截，待用户明确同意具体数据目的地后才进行；不存在新版真实效果通过记录。固定HTTP仍走原回答链路。
+
+## 会话HTTP请求结构（尚未接路由）
+
+schemas/conversations.py已新增ConversationCreateRequest，只定义as_of字段并拒绝额外字段，不调用现有核心函数。直接验证必填日期、非法日期及客户端身份/线程/状态覆盖拒绝，相关Ruff与格式检查通过。会话HTTP仍未接线，不加入当前运行图；计划的ConversationResponse尚未实现。
+
+## 会话HTTP响应结构（尚未接路由）
+
+schemas/conversations.py新增ConversationResponse，使用from_attributes从ORM读取id/status/as_of，状态类型限定ready/running/failed，不定义运行函数。直接验证公开字段白名单和未知状态拒绝，未连接数据库。下一步api/conversations.py的创建路由仍为计划，main未注册，当前运行图不变。
+
+## 会话HTTP创建接口（已注册并验证）
+
+本节替代前面请求/响应模型步骤中“尚未接路由”的状态。api/conversations.py新增create_conversation_api，main注册conversations_router，POST /api/conversations通过可信演示用户与Session依赖调用已有create_conversation；只接收as_of，返回201及id/status/as_of，服务端生成用户归属与内部线程映射。
+
+```mermaid
+flowchart LR
+    HTTP["POST /api/conversations"] --> REQUEST["ConversationCreateRequest + 可信user_id + Session"]
+    REQUEST --> TX["session.begin短事务"]
+    TX --> CREATE["create_conversation：检查用户/UUID/ready/flush"]
+    CREATE --> RESPONSE["ConversationResponse：id/status/as_of"]
+    RESPONSE --> COMMIT["事务成功提交"]
+    COMMIT --> RETURN["201 JSON"]
+    TX -->|LookupError / SQLAlchemyError| ROLLBACK["事务回滚 → 安全404 / 503"]
+```
+
+新运行函数清单已补create_conversation_api；schemas/conversations.py只有请求/响应数据类，不定义运行函数。GET查询和消息推进仍为计划，创建不会初始化checkpoint或调用模型。
+
+新增测试文件backend/tests/api/test_conversation_api.py，client复用现有API测试的临时库/lifespan模式及已有建表/种子函数；四个测试函数与参数化共10组，覆盖持久化/身份/白名单/非法请求/用户缺失/flush与commit失败回滚。辅助fail_after_flush/fail_commit属于测试。所有API和会话服务共108项通过，未请求模型或写演示库。
+
+## 会话HTTP创建与按归属查询（当前接口）
+
+api/conversations.py新增read_conversation并已随main注册的conversations_router生效。GET /api/conversations/{conversation_id}接收外部会话编号，身份来自get_current_user_id，复用get_conversation_for_user双条件查询。可返回ready/running/failed会话的三字段ConversationResponse，不写库、不改变updated_at，也不访问checkpoint；未知/越权统一404 CONVERSATION_NOT_FOUND，数据库故障503且不返回内部异常。
+
+```mermaid
+flowchart LR
+    HTTP["GET /api/conversations/{conversation_id}"] --> DEPS["get_session + get_current_user_id"]
+    DEPS --> SERVICE["get_conversation_for_user：user_id与conversation_id同时匹配"]
+    SERVICE -->|记录存在| RESPONSE["ConversationResponse：id/status/as_of → 200"]
+    SERVICE -->|None：不存在或越权| NOTFOUND["统一404 CONVERSATION_NOT_FOUND"]
+    SERVICE -->|SQLAlchemyError| UNAVAILABLE["503 CONVERSATION_UNAVAILABLE"]
+```
+
+新增测试test_read_conversation_returns_owned_record_without_changing_it、test_read_conversation_missing_and_unowned_return_identical_404、test_read_conversation_database_failure_returns_safe_503，9组查询情形，与创建10组合计19组。它们属于HTTP验证，不增加业务图节点。旧章节所写查询未接入已由本节更新；发送消息及会话Graph HTTP尚未实现，创建记录不等于已经运行Agent。
