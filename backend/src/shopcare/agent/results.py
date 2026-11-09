@@ -4,7 +4,7 @@ import re
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from shopcare.agent.state import AgentState
-from shopcare.schemas.answers import PolicyAnswer
+from shopcare.schemas.answers import AgentPolicyAnswer, PolicyAnswer, PolicyQuote
 from shopcare.schemas.policy_models import SemanticPolicySearchHit
 from shopcare.services.answer_generation import parse_policy_answer
 
@@ -88,6 +88,36 @@ def parse_agent_answer(state: AgentState) -> PolicyAnswer:
     if not isinstance(message.content, str):
         raise ValueError("结果必须为JSON文本")
     evidence = collect_policy_evidence(messages)
-    answer = parse_policy_answer(message.content, evidence)
+    answer = parse_agent_policy_answer(message.content, evidence)
     validate_consultation_answer(answer)
     return answer
+
+
+def validate_policy_quotes(
+    quotes: list[PolicyQuote],
+    evidence: list[SemanticPolicySearchHit],
+) -> None:
+    texts = {hit.chunk.chunk_id: hit.chunk.text for hit in evidence}
+    for quote in quotes:
+        if quote.chunk_id not in texts:
+            raise ValueError("摘录不属于本轮检索证据")
+        if quote.quote not in texts[quote.chunk_id]:
+            raise ValueError("摘录与政策原文不匹配")
+
+
+def parse_agent_policy_answer(
+    content: str,
+    evidence: list[SemanticPolicySearchHit],
+) -> PolicyAnswer:
+    candidate = AgentPolicyAnswer.model_validate_json(content)
+
+    validate_policy_quotes(candidate.policy_quotes, evidence)
+
+    quoted_ids = {quote.chunk_id for quote in candidate.policy_quotes}
+    if quoted_ids != set(candidate.citation_chunk_ids):
+        raise ValueError("引用编号与摘录编号不一致")
+
+    public_content = candidate.model_dump_json(
+        exclude={"policy_quotes"},
+    )
+    return parse_policy_answer(public_content, evidence)

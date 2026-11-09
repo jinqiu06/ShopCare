@@ -1,6 +1,6 @@
 # ShopCare 结构与运行流程
 
-核对日期：2026-11-07。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
+核对日期：2026-11-09。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
 
 ## 当前状态
 
@@ -10,6 +10,7 @@
 - 订单/政策工具及LangGraph有界循环已完成离线验收；会话归属、轮次事务及SQLite短期状态已接多轮CLI并做模拟模型跨进程验证。真实模型已跑通一组两轮样例：第二轮旧引用候选被纠正为本轮检索，明确只提供咨询；内容一致性仍有局限，尚未通过完整效果验收。会话HTTP、长期记忆和售后申请尚未完成。
 - Agent独立演示入口为scripts/run_agent.py：默认只预览，--run才执行图，并在结束后校验PolicyAnswer及引用来源；现有HTTP和answer_order仍走固定链路。
 - 持久化会话入口为scripts/chat_agent.py：新建或按conversation_id继续，由服务端校验归属、取得内部线程，逐轮保存状态并校验本轮引用；默认只预览。
+- Agent内部回答现在要求policy_quotes原文摘录：本轮来源、连续原文和引用编号覆盖均校验后，仍返回四字段PolicyAnswer；已做离线验证，11月9日新版真实模型试跑待确认。旧会话缺少此字段时CLI提示新建并保留原历史；固定HTTP回答链路未接此新检查。
 
 ## 目录职责
 
@@ -242,7 +243,7 @@ Set-Location D:\VsCode\ShopCare
 | agent/state.py | `AgentState`类型声明，无函数 |
 | agent/agent.py | `prepare_conversation_turn`, `execute_conversation_graph`, `run_conversation_turn`：短事务开始、可信线程/本轮图执行、独立成功/失败收尾；已接chat_agent CLI |
 | agent/prompts.py | `build_agent_messages`：构造初始系统规则与用户消息；`build_turn_reminder`：只列本轮证据的临时模型调用提醒，两个Agent CLI启用 |
-| agent/results.py | `collect_policy_evidence`：提取本次成功政策工具证据；`parse_agent_answer`：完成状态/最终消息/本轮引用校验；`validate_consultation_answer`：有限的明确执行承诺拦截，已接两个Agent CLI，未接HTTP |
+| agent/results.py | `collect_policy_evidence`：提取本次成功政策工具证据；`parse_agent_answer`：完成状态/最终消息/本轮引用校验；`validate_consultation_answer`：有限的明确执行承诺拦截；`validate_policy_quotes`：片段编号/连续原文摘录校验；`parse_agent_policy_answer`：内部JSON/摘录覆盖校验后返回PolicyAnswer；均已接两个Agent CLI，未接固定HTTP |
 | agent/__init__.py | 包声明，无函数、无核心调用 |
 | api/dependencies.py | `get_session`, `get_current_user_id` |
 | api/errors.py | `http_error_handler`, `validation_error_handler` |
@@ -740,3 +741,63 @@ flowchart TD
 新增验证函数：test_consultation_boundary_rejects_execution_promises、test_consultation_boundary_allows_negation_and_policy_description、test_turn_reminder_excludes_old_evidence_and_does_not_modify_history、test_model_node_corrects_execution_promise_within_original_budget、test_execute_graph_repairs_stale_citation_with_fresh_tools_within_turn_budget。覆盖正文/limitations承诺、否定表述、旧证据排除、超时/持续无效、真实临时工具与关闭重开保存器后的三次额度内纠正；更新原测试对最多3次纠正的预期。这些仅属于验证，不是新增业务入口。
 
 真实回归先确认仅提示仍会连续沿用旧引用并被拦截；增加明确tool_choice后，同一会话的两个独立CLI进程均返回ready，首轮澄清、次轮answered。次轮3次模型调用、1次成功的本轮search_order_policies，引用digital-exchange:v2:000；签收天数为3，明确不能创建/提交申请。该样例不证明普遍准确率；原始答复仍有政策未提供的“平台审核”措辞，对质量问题的表述也应继续保持条件性，未宣称完整内容验收。
+
+## 2026-11-09｜PolicyQuote数据模型独立验收
+
+新增数据类schemas/answers.py的PolicyQuote，字段chunk_id/quote均为非空字符串，禁止额外字段并去除首尾空白。不定义运行函数、不调用已有业务函数；只是后续政策原文摘录校验的数据结构，尚未加入PolicyAnswer、Agent输出或HTTP响应，当前运行图不变。
+
+验证补入既有test_answer_generation.py：test_policy_quote_trims_whitespace_and_preserves_original_text、test_policy_quote_rejects_blank_fields_and_extra_data，连同原测试35项通过。纯测试函数不加入业务运行图。下一步validate_policy_quotes仅为计划，尚未实现，不加入当前源码函数清单。
+
+## 2026-11-09｜政策原文摘录校验函数独立验收
+
+新增运行函数agent/results.py的validate_policy_quotes(quotes: list[PolicyQuote], evidence: list[SemanticPolicySearchHit]) -> None，当前仅可独立调用：调用方传入本轮证据 → 建立chunk_id到text映射 → 逐项检查摘录编号存在及quote属于对应text的连续子串 → 正常返回None或抛ValueError。它不调用业务服务、模型或数据库。尚未接parse_agent_answer、模型提示、纠正或HTTP/CLI，当前Agent主流程不变；摘录原文匹配不代表回答语义正确。
+
+验证辅助quote_evidence及测试test_validate_policy_quotes_accepts_exact_excerpts、test_validate_policy_quotes_rejects_unknown_or_changed_excerpt、test_validate_policy_quotes_requires_evidence_for_nonempty_quotes位于既有test_results.py，共9组新增情形；连同test_answer_generation.py共89项通过。纯测试函数不加入业务运行图。
+
+后续计划增加内部AgentPolicyAnswer(PolicyAnswer)的policy_quotes字段，以承载模型提供的摘录；该类尚未实现，不作为当前可用能力。现有对外PolicyAnswer不增加字段，接入时仍需明确引用与摘录覆盖规则、失败纠正和旧checkpoint处理。
+
+## 2026-11-09｜AgentPolicyAnswer内部模型独立验收
+
+开发者在schemas/answers.py新增AgentPolicyAnswer(PolicyAnswer)，继承status/answer/citation_chunk_ids/limitations，另有必填policy_quotes: list[PolicyQuote]。该类不定义运行函数，不调用业务服务；尚未用于真实模型请求和最终解析。原PolicyAnswer四字段结构保持不变。
+
+测试辅助test_agent_answer_parses_quotes_and_can_keep_public_answer_format、test_agent_answer_requires_valid_quote_list位于既有test_answer_generation.py，验证内部JSON字段及可显式排除policy_quotes后调用原parse_policy_answer；连同test_results.py共93项通过。仅验证模型结构及转换可行性，不表示实际入口已完成接入。
+
+下一步计划先独立增加parse_agent_policy_answer(content, evidence)，负责JSON→内部模型→摘录校验→引用/摘录编号集合一致→对外PolicyAnswer，尚未实现，不加入当前运行函数清单。现有parse_agent_answer、提示、纠正与checkpoint检查接线前需协调格式版本；不在本步直接切换入口。
+
+## 2026-11-09｜带原文摘录的JSON解析独立验收
+
+新增运行函数agent/results.py的parse_agent_policy_answer(content: str, evidence: list[SemanticPolicySearchHit]) -> PolicyAnswer。输入为模型JSON及调用方提供的本轮证据，成功返回原四字段PolicyAnswer，结构/摘录/覆盖/引用任一失败抛ValueError，不访问数据库或模型。仍未接parse_agent_answer，故当前CLI/HTTP运行关系不变；独立函数不执行validate_consultation_answer，该检查仍在外层parse_agent_answer。
+
+```mermaid
+flowchart LR
+    JSON["模型JSON + 本轮evidence"] --> MODEL["AgentPolicyAnswer.model_validate_json"]
+    MODEL --> QUOTES["validate_policy_quotes：编号/连续原文"]
+    QUOTES --> COVERAGE["摘录编号集合 == 引用编号集合"]
+    COVERAGE --> PUBLIC["model_dump_json：排除policy_quotes"]
+    PUBLIC --> PARSE["parse_policy_answer：原引用及格式检查"]
+    PARSE --> RESULT["PolicyAnswer：四字段"]
+```
+
+新增测试test_parse_agent_policy_answer_returns_public_format、test_parse_agent_policy_answer_rejects_invalid_quote_coverage，10组情形，连同相关模型/解析测试103项通过。尚需同步新模型提示、节点纠正解析、旧checkpoint处理和正式调用连线，不能把独立验证当成整体接入。真实摘录不保证回答语义由摘录支持。
+
+## 2026-11-09｜原文摘录校验正式接入Agent（离线验收）
+
+本节更新前面独立实现步骤的状态：parse_agent_answer已调用parse_agent_policy_answer，再调用validate_consultation_answer。两个正式Agent CLI经现有模型节点的validate_answers=True启用同一检查；提示要求AgentPolicyAnswer五字段，模型节点在原调用额度内纠正摘录/格式/引用错误，最终返回PolicyAnswer四字段。collect_policy_evidence与execute_conversation_graph的本轮消息切分不变，历史不是本轮证据。
+
+```mermaid
+flowchart TD
+    ENTRY["run_agent / chat_agent → 图与本轮消息"] --> MODEL["call_model：五字段提示/本轮证据提醒"]
+    MODEL --> CANDIDATE["parse_agent_answer：完成状态/最终AIMessage/collect_policy_evidence"]
+    CANDIDATE --> JSON["parse_agent_policy_answer：AgentPolicyAnswer"]
+    JSON --> QUOTE["validate_policy_quotes：本轮编号与连续原文"]
+    QUOTE --> IDS["摘录编号集合 == citation_chunk_ids集合"]
+    IDS --> PUBLIC["去除内部policy_quotes → parse_policy_answer"]
+    PUBLIC --> BOUNDARY["validate_consultation_answer"]
+    BOUNDARY --> ANSWER["PolicyAnswer：既有四字段"]
+    JSON -->|校验异常且有剩余额度| RETRY["保存反馈并纠正；缺本轮证据时要求检索"]
+    RETRY --> MODEL
+```
+
+上述纠正适用于整个解析链抛出的ValueError，额度耗尽后仍拒绝无效答案。节点为决定tool_choice而读取候选四字段时允许排除内部摘录字段，不代表最终回答可省略摘录；最终仍由parse_agent_answer严格验收。chat_agent对归属已验证的ready旧会话预检，历史最终JSON缺policy_quotes时提示新建且不领取/改状态、不改历史；其他不合规历史仍由底层重验拒绝。
+
+新增验证函数test_graph_corrects_invalid_excerpt_with_current_evidence_within_budget、test_chat_cli_refuses_legacy_answer_before_starting_and_preserves_history；扩展既有失败状态验证覆盖持续错误摘录。全量647项通过，Ruff与79文件格式检查通过。新版真实模型试跑被自动审批在执行前拦截，待用户明确同意具体数据目的地后才进行；不存在新版真实效果通过记录。固定HTTP仍走原回答链路。

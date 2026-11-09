@@ -71,7 +71,19 @@ def build_model_node(
                 except ValueError:
                     if next_calls < max_model_calls:
                         try:
-                            candidate = PolicyAnswer.model_validate_json(response.content)
+                            payload = json.loads(response.content)
+                            # 仅用于决定是否要求检索；不能代替上面的严格五字段校验。
+                            candidate = (
+                                PolicyAnswer.model_validate(
+                                    {
+                                        key: value
+                                        for key, value in payload.items()
+                                        if key != "policy_quotes"
+                                    }
+                                )
+                                if isinstance(payload, dict)
+                                else None
+                            )
                         except (ValueError, TypeError):
                             candidate = None
                         require_policy = (
@@ -84,10 +96,11 @@ def build_model_node(
                         )
                         updates.append(
                             SystemMessage(
-                                content="刚才的候选回答未通过格式、引用或执行承诺校验，未交付用户。"
+                                content="刚才的候选回答未通过格式、引用、原文摘录或执行承诺校验，未交付用户。"
                                 "请纠正：政策说明必须先检索本轮证据，不能沿用历史引用；"
                                 "本系统不能办理售后，不得承诺生成草稿/申请，也不能声称已执行。"
                                 "仅依据本轮订单事实和政策进行条件性解释。",
+                                # 下次请求的临时提醒会再次说明五字段及摘录规则。
                             )
                         )
                         continue

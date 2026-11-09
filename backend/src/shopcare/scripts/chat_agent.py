@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 from time import perf_counter
 
+from langchain_core.messages import AIMessage
 from langgraph.checkpoint.sqlite import SqliteSaver
 from openai import OpenAIError
 from sqlalchemy.engine import make_url
@@ -101,12 +102,30 @@ def main(argv: list[str] | None = None) -> int:
                 conversation_id = conversation.id
                 as_of = conversation.as_of
                 thread_id = conversation.thread_id
+                conversation_ready = conversation.status == "ready"
 
-            if (
-                args.conversation_id
-                and saver.get_tuple({"configurable": {"thread_id": thread_id}}) is None
-            ):
-                raise ValueError("已有会话的检查点不存在，请检查是否使用了原检查点数据库")
+            if args.conversation_id:
+                checkpoint = saver.get_tuple({"configurable": {"thread_id": thread_id}})
+                if checkpoint is None:
+                    raise ValueError("已有会话的检查点不存在，请检查是否使用了原检查点数据库")
+                history = checkpoint.checkpoint.get("channel_values", {}).get("messages", [])
+                if (
+                    conversation_ready
+                    and isinstance(history, list)
+                    and history
+                    and isinstance(history[-1], AIMessage)
+                ):
+                    try:
+                        saved_answer = json.loads(history[-1].content)
+                    except (ValueError, TypeError):
+                        saved_answer = None
+                    if isinstance(saved_answer, dict) and "policy_quotes" not in saved_answer:
+                        print(
+                            "旧会话缺少policy_quotes原文摘录，无法通过当前校验；请新建会话。"
+                            "原会话及历史已保留。",
+                            file=sys.stderr,
+                        )
+                        return 1
 
             before = perf_counter()
             answer = None

@@ -31,3 +31,21 @@ class OrderAnswerRequest(BaseModel):
         if not value:
             raise ValueError("不能为空")
         return value
+
+
+class PolicyQuote(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+    )
+
+    chunk_id: str = Field(
+        min_length=1,
+    )
+    quote: str = Field(
+        min_length=1,
+    )
+
+
+class AgentPolicyAnswer(PolicyAnswer):
+    policy_quotes: list[PolicyQuote]

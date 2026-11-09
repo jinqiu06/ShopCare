@@ -18,6 +18,7 @@ def test_model_node_corrects_execution_promise_within_original_budget(failure):
         "answer": "我们将为您生成换货申请草稿。",
         "citation_chunk_ids": [],
         "limitations": [],
+        "policy_quotes": [],
     }
     invalid = AIMessage(content=json.dumps(payload, ensure_ascii=False))
     valid = AIMessage(content=json.dumps({**payload, "answer": "请补充故障，本次仅提供咨询。"}))

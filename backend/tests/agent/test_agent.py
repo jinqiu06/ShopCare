@@ -144,6 +144,10 @@ def answer_message(status="answered", citation_ids=None):
                 "answer": "请补充具体故障，目前仅提供模拟政策咨询。",
                 "citation_chunk_ids": ["digital:v1:000"] if citation_ids is None else citation_ids,
                 "limitations": [],
+                "policy_quotes": [
+                    {"chunk_id": chunk_id, "quote": "模拟政策"}
+                    for chunk_id in (["digital:v1:000"] if citation_ids is None else citation_ids)
+                ],
             },
             ensure_ascii=False,
         )
@@ -217,7 +221,7 @@ def test_execute_graph_rejects_old_citation_and_cannot_reuse_invalid_saved_answe
         # 旧片段确实存在于历史中，但本轮没有检索，不能用于本轮引用。
         stale_client = Mock()
         stale_client.bind_tools.return_value.invoke.return_value = answer_message()
-        with pytest.raises(ValueError, match="引用不属于本次检索证据"):
+        with pytest.raises(ValueError, match="摘录不属于本轮检索证据"):
             agent.execute_conversation_graph(
                 session,
                 stale_client,
@@ -232,7 +236,7 @@ def test_execute_graph_rejects_old_citation_and_cannot_reuse_invalid_saved_answe
 
         # 即使持久化的stop_reason为completed，也必须重新检查上轮自身的证据范围。
         next_client = Mock()
-        with pytest.raises(ValueError, match="引用不属于本次检索证据"):
+        with pytest.raises(ValueError, match="摘录不属于本轮检索证据"):
             agent.execute_conversation_graph(
                 session, next_client, embedding, saver, "U001", thread_id, date(2026, 11, 2), "继续"
             )
@@ -437,7 +441,9 @@ def test_run_turn_commits_before_model_and_returns_ready_for_next_turn(run_conte
         assert record.as_of == date(2026, 11, 2)
 
 
-@pytest.mark.parametrize("failure", ["timeout", "invalid_json", "retrieval", "budget", "bind"])
+@pytest.mark.parametrize(
+    "failure", ["timeout", "invalid_json", "retrieval", "budget", "bind", "bad_quote"]
+)
 def test_run_turn_marks_failure_and_blocks_following_request(run_context, failure):
     client = run_context["chat_client"]
     invoke = client.bind_tools.return_value.invoke
@@ -450,6 +456,14 @@ def test_run_turn_marks_failure_and_blocks_following_request(run_context, failur
         run_context["embedding_client"].embed_query.side_effect = TimeoutError("retrieval timeout")
     elif failure == "bind":
         client.bind_tools.side_effect = RuntimeError("binding failed")
+    elif failure == "bad_quote":
+        wrong = json.loads(answer_message().content)
+        wrong["policy_quotes"][0]["quote"] = "必须平台审核"
+        invoke.side_effect = [
+            policy_request(),
+            AIMessage(content=json.dumps(wrong)),
+            AIMessage(content=json.dumps(wrong)),
+        ]
     else:
         invoke.side_effect = [policy_request(f"policy-{index}") for index in range(3)]
     with pytest.raises(RuntimeError if failure == "bind" else ValueError):
@@ -560,7 +574,7 @@ def reply(messages):
     if mode == "first":
         return AIMessage(content=json.dumps({
             "status": "needs_clarification", "answer": "请补充具体故障。",
-            "citation_chunk_ids": [], "limitations": []
+            "citation_chunk_ids": [], "limitations": [], "policy_quotes": []
         }))
     humans = [m.content for m in messages if isinstance(m, HumanMessage)]
     assert humans == ["订单O004的O004-I01耳机坏了，能换货吗？", "左边没声音"]
@@ -571,7 +585,8 @@ def reply(messages):
         }])
     return AIMessage(content=json.dumps({
         "status": "answered", "answer": "这是模拟政策说明，尚未创建任何申请。",
-        "citation_chunk_ids": ["digital:v1:000"], "limitations": []
+        "citation_chunk_ids": ["digital:v1:000"], "limitations": [],
+        "policy_quotes": [{"chunk_id": "digital:v1:000", "quote": "模拟政策"}]
     }))
 client.bind_tools.return_value.invoke.side_effect = reply
 chat_agent.Settings = lambda: Settings(

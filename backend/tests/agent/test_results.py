@@ -7,10 +7,140 @@ from shopcare.agent.prompts import build_turn_reminder
 from shopcare.agent.results import (
     collect_policy_evidence,
     parse_agent_answer,
+    parse_agent_policy_answer,
     validate_consultation_answer,
+    validate_policy_quotes,
 )
-from shopcare.schemas.answers import PolicyAnswer
+from shopcare.schemas.answers import PolicyAnswer, PolicyQuote
 from shopcare.schemas.policy_models import SemanticPolicySearchHit
+
+
+@pytest.fixture
+def quote_evidence():
+    return [
+        SemanticPolicySearchHit.model_validate(
+            {
+                "chunk": {
+                    "chunk_id": chunk_id,
+                    "policy_id": "demo",
+                    "version": "v1",
+                    "title": "模拟政策",
+                    "category": "数码",
+                    "effective_from": "2026-01-01",
+                    "effective_until": None,
+                    "text": text,
+                    "start_char": 0,
+                    "end_char": len(text),
+                },
+                "score": 0.9,
+            }
+        )
+        for chunk_id, text in [
+            ("exchange", "签收后15日内出现质量问题。正式提交需要用户确认。"),
+            ("return", "商品未拆封时可以进一步核实退货条件。"),
+        ]
+    ]
+
+
+@pytest.mark.parametrize(
+    "quotes",
+    [
+        [],
+        [("exchange", "正式提交需要用户确认。")],
+        [("exchange", "签收后15日内"), ("exchange", "正式提交需要用户确认。")],
+        [("exchange", "正式提交需要用户确认。"), ("return", "商品未拆封")],
+    ],
+)
+def test_validate_policy_quotes_accepts_exact_excerpts(quote_evidence, quotes):
+    items = [PolicyQuote(chunk_id=chunk_id, quote=text) for chunk_id, text in quotes]
+    before = [hit.model_dump() for hit in quote_evidence]
+    assert validate_policy_quotes(items, quote_evidence) is None
+    assert [hit.model_dump() for hit in quote_evidence] == before
+
+
+@pytest.mark.parametrize(
+    "chunk_id,text,error",
+    [
+        ("old-policy", "正式提交需要用户确认。", "不属于本轮"),
+        ("exchange", "正式提交需要平台审核。", "原文不匹配"),
+        ("exchange", "商品未拆封", "原文不匹配"),
+        ("exchange", "需要确认", "原文不匹配"),
+    ],
+)
+def test_validate_policy_quotes_rejects_unknown_or_changed_excerpt(
+    quote_evidence, chunk_id, text, error
+):
+    with pytest.raises(ValueError, match=error):
+        validate_policy_quotes([PolicyQuote(chunk_id=chunk_id, quote=text)], quote_evidence)
+
+
+def test_validate_policy_quotes_requires_evidence_for_nonempty_quotes():
+    with pytest.raises(ValueError, match="不属于本轮"):
+        validate_policy_quotes([PolicyQuote(chunk_id="exchange", quote="原文")], [])
+
+
+@pytest.mark.parametrize(
+    "status,quotes",
+    [
+        ("answered", ["正式提交需要用户确认。"]),
+        ("answered", ["签收后15日内", "正式提交需要用户确认。"]),
+        ("needs_clarification", []),
+        ("insufficient_evidence", []),
+    ],
+)
+def test_parse_agent_policy_answer_returns_public_format(quote_evidence, status, quotes):
+    result = parse_agent_policy_answer(
+        json.dumps(
+            {
+                "status": status,
+                "answer": "仅提供政策咨询，故障情况仍需核实。",
+                "citation_chunk_ids": ["exchange"] if quotes else [],
+                "limitations": [],
+                "policy_quotes": [{"chunk_id": "exchange", "quote": text} for text in quotes],
+            },
+            ensure_ascii=False,
+        ),
+        quote_evidence,
+    )
+    assert type(result) is PolicyAnswer
+    assert result.status == status
+    assert set(result.model_dump()) == {"status", "answer", "citation_chunk_ids", "limitations"}
+
+
+@pytest.mark.parametrize(
+    "ids,quotes,error",
+    [
+        (["exchange"], [], "编号不一致"),
+        ([], [("exchange", "正式提交需要用户确认。")], "编号不一致"),
+        (
+            ["exchange"],
+            [("exchange", "正式提交需要用户确认。"), ("return", "商品未拆封")],
+            "编号不一致",
+        ),
+        (["exchange"], [("exchange", "正式提交需要平台审核。")], "原文不匹配"),
+        (
+            ["exchange", "exchange"],
+            [("exchange", "正式提交需要用户确认。")],
+            "重复ID",
+        ),
+        ([], [], "必须提供引用"),
+    ],
+)
+def test_parse_agent_policy_answer_rejects_invalid_quote_coverage(
+    quote_evidence, ids, quotes, error
+):
+    content = json.dumps(
+        {
+            "status": "answered",
+            "answer": "这是模拟政策咨询。",
+            "citation_chunk_ids": ids,
+            "limitations": [],
+            "policy_quotes": [{"chunk_id": chunk_id, "quote": text} for chunk_id, text in quotes],
+        },
+        ensure_ascii=False,
+    )
+    with pytest.raises(ValueError, match=error):
+        parse_agent_policy_answer(content, quote_evidence)
 
 
 @pytest.mark.parametrize("field", ["answer", "limitations"])
@@ -35,7 +165,12 @@ def test_consultation_boundary_rejects_execution_promises(field, claim):
         validate_consultation_answer(answer)
     with pytest.raises(ValueError, match="不能承诺"):
         parse_agent_answer(
-            {"messages": [AIMessage(content=answer.model_dump_json())], "stop_reason": "completed"}
+            {
+                "messages": [
+                    AIMessage(content=json.dumps({**answer.model_dump(), "policy_quotes": []}))
+                ],
+                "stop_reason": "completed",
+            }
         )
 
 
@@ -172,6 +307,7 @@ def test_parse_agent_answer_accepts_direct_answer_without_tool_calls(status):
         "answer": "请补充订单号和具体故障，目前仅提供咨询。",
         "citation_chunk_ids": [],
         "limitations": [],
+        "policy_quotes": [],
     }
     state = {
         "messages": [HumanMessage(content="坏了怎么办"), AIMessage(content=json.dumps(payload))],
@@ -179,7 +315,9 @@ def test_parse_agent_answer_accepts_direct_answer_without_tool_calls(status):
         "model_calls": 1,
         "tool_calls": 0,
     }
-    assert parse_agent_answer(state).model_dump() == payload
+    assert parse_agent_answer(state).model_dump() == {
+        key: value for key, value in payload.items() if key != "policy_quotes"
+    }
 
 
 @pytest.mark.parametrize("stop_reason", ["running", "failed", "budget_exhausted"])
@@ -224,6 +362,7 @@ def test_parse_agent_answer_rejects_unusable_final_message(messages):
                 "answer": "可以换货",
                 "citation_chunk_ids": [],
                 "limitations": [],
+                "policy_quotes": [],
             }
         ),
         json.dumps(
@@ -232,6 +371,7 @@ def test_parse_agent_answer_rejects_unusable_final_message(messages):
                 "answer": "请补充故障",
                 "citation_chunk_ids": ["invented:v1:000"],
                 "limitations": [],
+                "policy_quotes": [{"chunk_id": "invented:v1:000", "quote": "原文"}],
             }
         ),
         json.dumps(
@@ -240,6 +380,7 @@ def test_parse_agent_answer_rejects_unusable_final_message(messages):
                 "answer": "   ",
                 "citation_chunk_ids": [],
                 "limitations": [],
+                "policy_quotes": [],
             }
         ),
     ],

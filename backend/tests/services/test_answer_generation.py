@@ -5,9 +5,66 @@ from unittest.mock import Mock
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from shopcare.schemas.answers import AgentPolicyAnswer, PolicyAnswer, PolicyQuote
 from shopcare.schemas.orders import OrderItemResponse, OrderResponse
 from shopcare.schemas.policy_models import PolicyChunk, SemanticPolicySearchHit
 from shopcare.services.answer_generation import build_answer_messages, parse_policy_answer
+
+
+def test_policy_quote_trims_whitespace_and_preserves_original_text():
+    quote = PolicyQuote(
+        chunk_id=" digital-exchange:v2:000 ",
+        quote=" 正式提交需要用户确认。 ",
+    )
+    assert quote.model_dump() == {
+        "chunk_id": "digital-exchange:v2:000",
+        "quote": "正式提交需要用户确认。",
+    }
+    assert PolicyQuote.model_validate_json(quote.model_dump_json()) == quote
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"chunk_id": ""},
+        {"chunk_id": " \t "},
+        {"quote": ""},
+        {"quote": " \n "},
+        {"quote": None},
+        {"unexpected": "extra"},
+    ],
+)
+def test_policy_quote_rejects_blank_fields_and_extra_data(invalid):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        PolicyQuote.model_validate({"chunk_id": "policy", "quote": "原文"} | invalid)
+
+
+def test_agent_answer_parses_quotes_and_can_keep_public_answer_format(evidence):
+    answer = AgentPolicyAnswer.model_validate_json(
+        payload(policy_quotes=[{"chunk_id": "demo:v1:000", "quote": "模拟政策"}])
+    )
+    assert isinstance(answer.policy_quotes[0], PolicyQuote)
+    public_answer = parse_policy_answer(answer.model_dump_json(exclude={"policy_quotes"}), evidence)
+    assert type(public_answer) is PolicyAnswer
+    assert set(public_answer.model_dump()) == {
+        "status",
+        "answer",
+        "citation_chunk_ids",
+        "limitations",
+    }
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [{}, {"policy_quotes": None}, {"policy_quotes": [{"chunk_id": "demo:v1:000", "quote": " "}]}],
+)
+def test_agent_answer_requires_valid_quote_list(updates):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        AgentPolicyAnswer.model_validate_json(payload(**updates))
 
 
 @pytest.fixture

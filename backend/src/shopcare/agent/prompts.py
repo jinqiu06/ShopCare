@@ -26,7 +26,13 @@ def build_turn_reminder(messages: list[BaseMessage]) -> SystemMessage:
             "本系统仅提供咨询，不能生成草稿或创建/提交申请，不得说我们将为您办理。"
             "不要加入本轮证据未提供的包装、配件等条件。"
             "政策里的办理流程不代表本系统具备这些能力；本次未执行任何售后操作。"
-            "最终仍只输出PolicyAnswer JSON。"
+            "最终只输出AgentPolicyAnswer JSON，包含status、answer、citation_chunk_ids、"
+            "limitations、policy_quotes五个字段。policy_quotes是对象列表，"
+            "每项为chunk_id和quote；quote必须是对应本轮政策text中的连续原文，"
+            "优先摘录完整句子，不改写、不拼接或省略否定条件。"
+            "每个引用至少有一条原文摘录，摘录编号集合必须与引用编号集合完全一致；"
+            "没有政策引用时policy_quotes也必须显式输出空列表。"
+            "摘录存在不代表解释一定正确，回答和limitations也只能说明原文支持的条件。"
         )
     )
 
@@ -40,12 +46,20 @@ def build_agent_messages(query: str, as_of: date) -> list[BaseMessage]:
 只提供模拟售后咨询，不能承诺生成草稿、创建申请、退款或换货。
 用户自述故障不等于确认质量问题；证据不足时明确说明。
 用户仅说“耳机坏了”等、未说明具体故障时，使用needs_clarification并询问故障表现。
-最终输出 PolicyAnswer 的四个字段：`status`、`answer`、`citation_chunk_ids`、`limitations`。
+最终输出 AgentPolicyAnswer 的五个字段：
+`status`、`answer`、`citation_chunk_ids`、`limitations`、`policy_quotes`。
 最终回答只输出一个 JSON 对象，不加 Markdown 代码围栏或其他文字。
 status 只能为 answered、needs_clarification、insufficient_evidence。
 信息足以解释相关政策时用 answered;需要补充关键事实时用 needs_clarification。
 没有相关证据时用 insufficient_evidence。
 answer 为非空中文字符串,citation_chunk_ids 为字符串列表,limitations 为字符串列表。
+policy_quotes为对象列表，每项包含chunk_id和quote两个非空字符串。
+quote必须完整、连续地摘自本轮对应政策片段的text，不改写、不拼接，也不省略否定条件。
+引用编号集合必须与摘录编号集合完全一致，每个引用至少有一条摘录。
+没有政策引用时，citation_chunk_ids和policy_quotes都必须显式输出空列表。
+原文摘录只用于核对出处，answer与limitations中的解释也必须有原文依据。
+例如原文仅写“正式提交需要用户确认”，不得改称“必须平台审核”，也不能添加包装等条件。
+用户自述单侧无声应表述为“若经核实属于质量问题，可依据政策进一步确认”，不能当作检测结论。
 引用只能来自本次政策工具成功返回的 chunk.chunk_id;answered 必须有引用。
 多轮对话中，历史消息用于理解上下文；本轮涉及政策说明时重新调用政策检索工具。
 最终引用只能来自本轮成功返回的政策结果，不直接沿用上一轮的引用。

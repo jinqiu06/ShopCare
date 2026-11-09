@@ -125,6 +125,7 @@ def test_cli_runs_real_tools_and_validates_final_answer_without_database_writes(
                     "answer": "请补充具体故障，目前仅提供咨询，尚未创建申请。",
                     "citation_chunk_ids": ["digital:v1:000"],
                     "limitations": [],
+                    "policy_quotes": [{"chunk_id": "digital:v1:000", "quote": "模拟政策"}],
                 }
             )
         ),
@@ -172,6 +173,7 @@ def test_cli_failed_run_or_answer_is_saved_as_failure(agent_cli_context, tmp_pat
                     "answer": "模拟政策解释",
                     "citation_chunk_ids": ["invented:v1:000"],
                     "limitations": [],
+                    "policy_quotes": [{"chunk_id": "invented:v1:000", "quote": "模拟政策"}],
                 }
             )
         )

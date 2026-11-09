@@ -405,3 +405,43 @@
 - 正文/limitations执行承诺模式的检查是有限中文措辞检查，不能判断全部语义。真实样例仍有证据未提供的“平台审核”措辞和质量问题表述强弱问题，所以本次仅确认两轮运行、当前引用与明确执行承诺修复，不宣称真实效果全面通过。下一阶段内容一致性需单独设定范围；本次不增加HTTP、长期记忆或售后写操作。
 - 实际模型请求及会话/检查点/报告仅在本地模拟数据环境；未改订单、政策、向量或用户身份绑定。保留失败与成功样例，不提交data/private或数据库。
 - 最终全量后端612项通过（26.54秒，-W error），全后端Ruff与79个Python文件格式检查通过。全量中曾有一个新测试样本缺effective_until，补全后重新全量通过；不是生产代码放宽校验。日期修复与第二轮修复一并按持续授权提交，推送结果以Git核验为准。
+
+## 2026-11-09｜政策原文摘录校验：小步设计开始
+
+- 开始核对：main最新提交b5cecb5，工作区干净；上次612项全量结果属于11月7日，今天未重跑。已有本轮引用来源与明确执行承诺检查，但真实样例仍加入政策未给出的平台审核措辞。
+- 本阶段范围：为Agent政策引用增加可核验的原文摘录，先定义PolicyQuote(chunk_id, quote)，再编写本轮来源/原文匹配校验并接现有回答校验与预算内纠正；保留现有对外PolicyAnswer结构的兼容要求，接入前核对内部表示与历史检查策略，不直接更改既有HTTP响应。摘录匹配不等于完整语义蕴含验证，不能宣称彻底解决所有编造解释。
+- 首个学习任务：在既有schemas/answers.py、PolicyAnswer之前由开发者增加PolicyQuote类，extra=forbid、str_strip_whitespace=True，chunk_id/quote均为非空字符串；不新增Python文件，不改变PolicyAnswer和当前运行流程。后续校验函数及接入尚未实现，今天未调用真实模型或修改演示数据库。
+
+### PolicyQuote模型小步验收
+
+- 开发者在既有schemas/answers.py完成PolicyQuote，两个非空字符串字段、禁止多余字段和去除首尾空白均正确；位置在文件末尾不影响职责，助手仅补类间空行及文件末尾换行，保留字段多行布局。
+- 复用既有test_answer_generation.py新增test_policy_quote_trims_whitespace_and_preserves_original_text、test_policy_quote_rejects_blank_fields_and_extra_data；该文件35项通过（-W error），相关Ruff与格式检查通过。未新增Python文件、未请求真实模型、未修改数据库、未改变PolicyAnswer或HTTP/CLI响应。
+- 下一小步计划在agent/results.py由开发者实现validate_policy_quotes(quotes, evidence) -> None：核对每条摘录编号属于调用方提供的本轮证据，并且摘录为该片段text的连续原文；不做模糊匹配，不将原文匹配等同语义正确。当前尚未实现或接入解析、提示和纠正流程。
+
+### validate_policy_quotes独立小步验收
+
+- 开发者完成agent/results.py的validate_policy_quotes，按chunk_id查对应原文，拒绝不属于传入证据的编号及非连续原文摘录；助手仅整理空行、空格和字典推导格式，未改变算法。函数不查询数据库、不调用模型，成功返回None，错误抛ValueError。
+- 复用test_results.py补quote_evidence及三个测试函数，9组验证：空列表、完整/部分原文、同片段多条摘录、多个片段、旧编号、改写条件、跨片段借用、非连续拼接、无证据。test_results.py与test_answer_generation.py合计89项通过（-W error），相关Ruff通过，未新增Python文件/真实模型请求或测试临时目录。
+- 此函数仍独立，不要求PolicyAnswer附带摘录，也不检查摘录是否覆盖所有引用、是否支持回答的语义。下一小步计划在schemas/answers.py新增内部AgentPolicyAnswer(PolicyAnswer)，增加必填policy_quotes列表；尚未实现。后续解析需校验摘录与引用编号覆盖关系，并处理旧checkpoint的格式兼容/拒绝策略；现有HTTP/CLI输出保持既有PolicyAnswer。
+
+### AgentPolicyAnswer内部模型小步验收
+
+- 开发者完成schemas/answers.py的AgentPolicyAnswer(PolicyAnswer)，必填policy_quotes: list[PolicyQuote]，继承既有四字段及禁止额外字段规则。助手仅补类间空行，保留字段多行布局。原PolicyAnswer与现有响应不变。
+- 在既有test_answer_generation.py补test_agent_answer_parses_quotes_and_can_keep_public_answer_format、test_agent_answer_requires_valid_quote_list：验证JSON嵌套摘录、缺少/空类型/空白摘录拒绝及排除内部字段后可复用parse_policy_answer。两个相关测试文件共93项通过（-W error），相关Ruff通过。未新增Python文件、模型请求或数据库写入。
+- 下一步先独立实现agent/results.py的parse_agent_policy_answer(content, evidence) -> PolicyAnswer：解析内部模型、原文校验、引用编号集合与摘录编号集合一致、去掉内部字段后复用parse_policy_answer。函数尚未实现，不直接切换现有parse_agent_answer，避免模型提示/旧checkpoint策略尚未同步时破坏当前入口。后续再一并接线及测试预算内纠正。
+
+### parse_agent_policy_answer独立小步验收
+
+- 开发者完成agent/results.py的parse_agent_policy_answer：内部AgentPolicyAnswer解析→validate_policy_quotes→摘录/引用编号集合一致→排除policy_quotes→复用parse_policy_answer，返回原四字段PolicyAnswer。助手仅整理缩进、空行和尾空格，未改变逻辑。
+- test_results.py新增test_parse_agent_policy_answer_returns_public_format、test_parse_agent_policy_answer_rejects_invalid_quote_coverage，共10组验证，覆盖三种状态、同片段多摘录、缺少/多余摘录、改写原文、重复引用和answered缺引用。两个相关文件103项通过（-W error），相关Ruff通过；未新增Python文件、真实模型调用或数据库写入。
+- 当前仍是独立函数，未接Agent主入口。下一步由开发者将parse_agent_answer中parse_policy_answer调用替换为parse_agent_policy_answer；随后助手统一处理五字段模型提示、节点纠正时内部格式解析、模拟返回、旧checkpoint拒绝策略和完整回归。在这些配套完成前不作为真实可用入口验收，也不放宽原文检查来兼容旧格式。
+
+### 11月9日：Agent原文摘录校验完成离线接入
+
+- 开发者核心：schemas/answers.py的PolicyQuote、AgentPolicyAnswer；agent/results.py的validate_policy_quotes、parse_agent_policy_answer，并将parse_agent_answer接到新解析。助手整理局部格式，保留字段多行声明，未改原文匹配和集合覆盖算法。
+- 助手配套：prompts的初始/逐次提醒明确五字段、连续原文、引用与摘录覆盖、无引用时显式空列表及条件性解释；nodes纠正反馈增加摘录失败提示。纠正时仅为决定是否要求检索而读取候选四个公开字段，最终接受仍必须通过严格五字段校验，不通过删除policy_quotes来放宽校验。
+- 旧格式策略：chat_agent在可信用户归属查询后、开始running前检查已完成历史是否缺少policy_quotes；缺少时明确提示新建会话，保留ready及原checkpoint，不自动迁移。底层execute仍会通过当前parse_agent_answer重验上一轮，旧格式不能绕过检查。缺检查点/失败/忙碌/越权等既有边界保持原验证。
+- 配套测试：更新仅Agent相关Mock回答为五字段；固定HTTP/单次固定回答测试不改输出契约。新增test_graph_corrects_invalid_excerpt_with_current_evidence_within_budget（3组）、test_chat_cli_refuses_legacy_answer_before_starting_and_preserves_history，并在既有test_run_turn_marks_failure_and_blocks_following_request增加bad_quote；覆盖摘录改写、缺字段、覆盖缺失、原3次模型/4次工具额度内纠正、持续错误failed、跨进程续接、旧状态和历史保留。无新增Python文件。
+- 最终完整后端647项通过（30.51秒，-W error），全后端Ruff通过，79个Python文件格式检查通过。初次相关集成仅有一处测试仍把内部五字段与对外四字段直接比较，修正断言后全量通过；没有放宽生产校验。
+- 新版真实试跑请求在执行前被自动审批拒绝，理由是需要用户明确同意本次模拟订单/故障/政策文本发送到具体模型目的地；未绕过拒绝，也未创建这次真实会话。只读核对配置：对话qwen-plus、向量text-embedding-v4，目的地均dashscope.aliyuncs.com，不读取或展示密钥。等待用户确认后才做新版两轮真实验收，11月7日旧格式样例不计作本次通过。
+- 本轮运行验证仅临时数据库和Mock外部模型，未修改演示订单/政策/向量或已有会话。摘录真并不证明解释语义正确，澄清回答不带引用却解释政策、无依据推论及引用截取语义仍不宣称已解决。会话HTTP、长期记忆和售后执行不在本次范围。

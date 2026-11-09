@@ -4,8 +4,10 @@ from unittest.mock import Mock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.sqlite import SqliteSaver
 from sqlalchemy.orm import Session
 
+from shopcare.agent.graph import build_agent_graph
 from shopcare.core.config import Settings
 from shopcare.db import build_engine, init_db
 from shopcare.db.models import Conversation
@@ -63,6 +65,7 @@ def test_chat_cli_creates_and_continues_same_conversation(chat_cli_context, tmp_
         "answer": "请补充具体故障，目前仅提供咨询。",
         "citation_chunk_ids": [],
         "limitations": [],
+        "policy_quotes": [],
     }
     client.bind_tools.return_value.invoke.return_value = AIMessage(content=json.dumps(payload))
     arguments = ["--run", "--checkpoint-db", str(checkpoint)]
@@ -71,7 +74,9 @@ def test_chat_cli_creates_and_continues_same_conversation(chat_cli_context, tmp_
     assert json.loads(output.read_text(encoding="utf-8")) == first
     assert first["conversation_status"] == "ready"
     assert first["answer_validated"] is True
-    assert first["answer"] == payload
+    assert first["answer"] == {
+        key: value for key, value in payload.items() if key != "policy_quotes"
+    }
     record_id = first["conversation_id"]
 
     # 用新的模型响应对象模拟另一轮服务请求。
@@ -159,6 +164,60 @@ def test_chat_cli_cannot_continue_another_users_conversation(chat_cli_context, t
         engine.dispose()
 
 
+def test_chat_cli_refuses_legacy_answer_before_starting_and_preserves_history(
+    chat_cli_context, tmp_path, capsys
+):
+    settings, client, embedding = chat_cli_context
+    engine = build_engine(settings.database_url)
+    checkpoint = tmp_path / "legacy.db"
+    legacy_answer = json.dumps(
+        {
+            "status": "needs_clarification",
+            "answer": "请补充故障。",
+            "citation_chunk_ids": [],
+            "limitations": [],
+        }
+    )
+    try:
+        with Session(engine) as session, session.begin():
+            conversation = create_conversation(session, "U001", date(2026, 11, 2))
+            record_id, thread_id = conversation.id, conversation.thread_id
+        config = {"configurable": {"thread_id": thread_id}}
+        old_client = Mock()
+        old_client.bind_tools.return_value.invoke.return_value = AIMessage(content=legacy_answer)
+        with SqliteSaver.from_conn_string(str(checkpoint)) as saver:
+            graph = build_agent_graph(old_client, [], checkpointer=saver)
+            graph.invoke(
+                {
+                    "messages": [HumanMessage(content="耳机坏了")],
+                    "model_calls": 0,
+                    "tool_calls": 0,
+                    "stop_reason": "running",
+                },
+                config=config,
+            )
+        assert (
+            chat_agent.main(
+                ["--run", "--conversation-id", record_id, "--checkpoint-db", str(checkpoint)]
+            )
+            == 1
+        )
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "旧会话缺少policy_quotes" in captured.err
+        assert "请新建会话" in captured.err
+        client.bind_tools.assert_not_called()
+        embedding.embed_query.assert_not_called()
+        with Session(engine) as session:
+            assert session.get(Conversation, record_id).status == "ready"
+        with SqliteSaver.from_conn_string(str(checkpoint)) as saver:
+            state = saver.get_tuple(config).checkpoint["channel_values"]
+            assert len(state["messages"]) == 2
+            assert state["messages"][-1].content == legacy_answer
+    finally:
+        engine.dispose()
+
+
 def test_chat_cli_rejects_missing_checkpoint_without_starting_a_fresh_history(
     chat_cli_context, tmp_path, capsys
 ):
@@ -170,6 +229,7 @@ def test_chat_cli_rejects_missing_checkpoint_without_starting_a_fresh_history(
                 "answer": "请补充具体故障。",
                 "citation_chunk_ids": [],
                 "limitations": [],
+                "policy_quotes": [],
             }
         )
     )

@@ -152,6 +152,9 @@ def test_graph_final_answer_is_validated_against_actual_policy_results(
                     "answer": "这是模拟政策说明，目前仅提供咨询，尚未创建申请。",
                     "citation_chunk_ids": citation_ids,
                     "limitations": [],
+                    "policy_quotes": [
+                        {"chunk_id": chunk_id, "quote": "模拟政策"} for chunk_id in citation_ids
+                    ],
                 }
             )
         ),
@@ -165,6 +168,47 @@ def test_graph_final_answer_is_validated_against_actual_policy_results(
     else:
         with pytest.raises(ValueError):
             parse_agent_answer(result)
+
+
+@pytest.mark.parametrize("failure", ["changed_excerpt", "missing_quotes", "missing_coverage"])
+def test_graph_corrects_invalid_excerpt_with_current_evidence_within_budget(graph_context, failure):
+    tools, embedding = graph_context
+    payload = {
+        "status": "answered",
+        "answer": "这是模拟政策咨询，未创建任何申请。",
+        "citation_chunk_ids": ["digital:v1:000"],
+        "limitations": [],
+        "policy_quotes": [{"chunk_id": "digital:v1:000", "quote": "模拟政策"}],
+    }
+    invalid = {
+        **payload,
+        "policy_quotes": [{"chunk_id": "digital:v1:000", "quote": "必须平台审核"}],
+    }
+    if failure == "missing_quotes":
+        invalid.pop("policy_quotes")
+    elif failure == "missing_coverage":
+        invalid["policy_quotes"] = []
+    client = Mock()
+    client.bind_tools.return_value.invoke.side_effect = [
+        tool_request(
+            "search_order_policies",
+            {"order_id": "O004", "item_id": "O004-I01", "query": "耳机换货"},
+        ),
+        AIMessage(content=json.dumps(invalid)),
+        AIMessage(content=json.dumps(payload)),
+    ]
+    source = initial_state()
+    source["messages"] = build_agent_messages("耳机换货", date(2026, 11, 2))
+    result = build_agent_graph(client, tools, validate_answers=True).invoke(source)
+    answer = parse_agent_answer(result)
+    assert answer.citation_chunk_ids == ["digital:v1:000"]
+    assert "policy_quotes" not in answer.model_dump()
+    assert (result["model_calls"], result["tool_calls"]) == (3, 1)
+    assert client.bind_tools.return_value.invoke.call_count == 3
+    client.bind_tools.assert_called_once_with(tools)
+    embedding.embed_query.assert_called_once()
+    final_input = client.bind_tools.return_value.invoke.call_args.args[0]
+    assert any("原文摘录" in m.content for m in final_input if m.type == "system")
 
 
 def test_graph_direct_answer_skips_tools(graph_context):
