@@ -38,6 +38,13 @@ def test_model_node_corrects_execution_promise_within_original_budget(failure):
         "tool_calls": 0,
         "stop_reason": "running",
     }
+    if failure == "timeout":
+        with pytest.raises(TimeoutError, match="private upstream detail"):
+            build_model_node(client, [], validate_answers=True, propagate_model_errors=True)(state)
+        assert invoke.call_count == 2
+        assert state["model_calls"] == 1
+        assert len(state["messages"]) == 1
+        return
     result = build_model_node(client, [], validate_answers=True)(state)
     assert invoke.call_count == 2
     assert result["model_calls"] == 3

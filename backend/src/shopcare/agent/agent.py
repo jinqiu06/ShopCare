@@ -67,6 +67,7 @@ def execute_conversation_graph(
         tools,
         checkpointer=checkpointer,
         validate_answers=True,
+        propagate_model_errors=True,
     )
     config = {"configurable": {"thread_id": thread_id}}
     snapshot = graph.get_state(config)
@@ -74,7 +75,14 @@ def execute_conversation_graph(
         raise ValueError("上轮执行未正常结束")
 
     history = snapshot.values.get("messages", [])
-    if snapshot.values:
+    initialized_empty = (
+        snapshot.values == {"messages": []}
+        and snapshot.metadata is not None
+        and snapshot.metadata.get("source") == "input"
+        and snapshot.metadata.get("step") == -1
+        and snapshot.metadata.get("shopcare_initialized") is True
+    )
+    if snapshot.values and not initialized_empty:
         if not isinstance(history, list) or not history:
             raise ValueError("已保存的会话历史不完整")
 
@@ -99,7 +107,6 @@ def execute_conversation_graph(
     }
     result = graph.invoke(state, config=config)
 
-    # 历史供模型理解上下文；引用校验只读取本轮新增的消息。
     current_turn = result.copy()
     current_turn["messages"] = result["messages"][history_count:]
     return parse_agent_answer(current_turn)

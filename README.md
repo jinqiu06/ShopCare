@@ -1,6 +1,6 @@
 # ShopCare
 
-面向电商售后场景的 Agent 后端项目。当前已完成订单查询、词法/语义检索、单次回答HTTP、只读工具及LangGraph有界循环；已实现按用户隔离的会话、SQLite持久化短期状态和多轮CLI，并完成模拟模型的跨进程恢复验证。真实模型已跑通一组两轮样例，验证重新检索与咨询能力边界；内容一致性仍有局限，尚未通过完整效果验收。会话HTTP、长期记忆和售后申请尚未完成。
+面向电商售后场景的 Agent 后端项目。当前已完成订单查询、词法/语义检索、单次回答HTTP、只读工具及LangGraph有界循环；已实现按用户隔离的会话、SQLite持久化短期状态和多轮CLI，并完成模拟模型的跨进程恢复验证。真实模型已跑通一组两轮样例，验证重新检索与咨询能力边界；内容一致性仍有局限，尚未通过完整效果验收。会话HTTP已通过模拟模型的两轮离线验证；长期记忆和售后申请尚未完成。
 
 ## 当前功能
 
@@ -10,7 +10,7 @@
 - SQLAlchemy 模型包含外键、状态、非负金额和正数数量约束；SQLite 连接显式开启外键检查。
 - 提供可重复运行的模拟数据命令：2 名用户、20 笔订单、40 个商品项；已有记录不覆盖。
 - Pydantic 配置支持根目录 `.env` 和环境变量覆盖，缺少模型 Key 不影响订单查询。
-- 666 项离线测试（2026-11-09）覆盖配置、数据库、事务、服务/API、Agent、跨进程恢复、原文摘录校验及预算内回答纠正。
+- 718 项离线测试（2026-11-10）覆盖配置、数据库、事务、服务/API、Agent、跨进程恢复、原文摘录校验及预算内回答纠正。
 
 ## 环境与安装
 
@@ -54,8 +54,9 @@ Copy-Item .env.example .env
 | GET | `/api/orders/{order_id}` | 查询当前用户的指定订单 |
 | GET | `/api/orders/{order_id}/items` | 按需查询该订单商品项 |
 | POST | `/api/orders/{order_id}/answer` | 对选中商品进行单次政策咨询 |
-| POST | `/api/conversations` | 创建会话，固定模拟参照日期；当前尚未接消息推进 |
+| POST | `/api/conversations` | 创建会话，固定模拟参照日期并登记空检查点 |
 | GET | `/api/conversations/{conversation_id}` | 按当前用户归属读取会话状态和参照日期 |
+| POST | `/api/conversations/{conversation_id}/messages` | 发送问题，执行一轮Agent，返回PolicyAnswer |
 
 limit 默认 20，范围 1–100；offset 默认 0，最小 0。参数不合法时返回 422。列表响应仍为数组，不包含总条数。
 
@@ -381,3 +382,13 @@ run_conversation_turn先检查输入，在短事务中取得执行权并提交ru
 Agent内部最终JSON增加必填`policy_quotes`，每项为`chunk_id`与对应本轮政策`text`的连续原文`quote`；摘录编号集合必须与引用编号集合一致。校验及既有引用/咨询边界检查通过后，CLI的`answer`仍是原四字段`PolicyAnswer`，摘录保留在内部消息/检查点中。固定HTTP回答入口没有接入该项检查。
 
 `chat_agent`继续旧会话时，如果已完成回答缺少`policy_quotes`，会提示新建会话，并保留原状态和历史；不自动补写或伪造摘录。模型提示和预算内纠正流程已同步，但新版真实模型试跑尚未执行。原文摘录匹配只证明出处与文本一致，不能保证回答中的全部推论正确。
+
+## 会话消息HTTP（2026-11-10，模拟模型离线验收）
+
+先POST /api/conversations，传入 {"as_of":"2026-11-02"}，保存返回的id；再POST /api/conversations/{id}/messages，传入 {"query":"订单O004的O004-I01耳机坏了"}。后续问题继续使用同一个id；可信身份固定为演示用户U001，参照日期取创建时的会话记录，客户端不能在消息请求中覆盖。
+
+消息响应为PolicyAnswer的status、answer、citation_chunk_ids、limitations四个字段，不公开内部thread_id或模型原始消息。消息服务检查归属、ready与已有历史，管理请求级保存器/HTTP连接，复用run_conversation_turn原子领取和Graph执行。GET /api/conversations/{id}可查询ready/running/failed。
+
+不存在/越权404，非ready或缺历史409，输入422，配置/数据库/检查点打开故障503，模型超时504，上游SDK故障502。执行异常后通常写failed；若进程中断或收尾写库失败仍可能遗留running。未实现幂等重试、自动恢复或售后写操作，请先查询状态，不要把重复发送视为安全重试。
+
+验收仅使用临时SQLite及Mock模型客户端，实际运行HTTP、服务、Graph、工具检索和检查点，证明首轮澄清→第二轮加载历史并检索本轮政策证据、每轮结束ready和连接关闭。此前章节中的“会话HTTP未完成”描述为当时状态，以本节为准；未新增真实模型效果验收。

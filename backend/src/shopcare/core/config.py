@@ -19,5 +19,9 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         env_ignore_empty=True,
     )
+    agent_checkpoint_db: str = Field(
+        default="data/private/agent-checkpoints.db",
+        min_length=1,
+    )
 
     database_url: str = "sqlite:///./data/shopcare.db"

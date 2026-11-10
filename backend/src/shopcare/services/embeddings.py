@@ -1,5 +1,6 @@
 from math import sqrt
 
+from httpx import Client
 from langchain_openai import OpenAIEmbeddings
 
 from shopcare.core.config import Settings
@@ -35,7 +36,11 @@ def cosine_similarity(
     return similarity
 
 
-def build_embedding_client(settings: Settings) -> OpenAIEmbeddings:
+def build_embedding_client(
+    settings: Settings,
+    *,
+    http_client: Client | None = None,
+) -> OpenAIEmbeddings:
     api_key = settings.embedding_api_key or settings.llm_api_key
     base_url = settings.embedding_base_url or settings.llm_base_url
 
@@ -55,4 +60,5 @@ def build_embedding_client(settings: Settings) -> OpenAIEmbeddings:
         model_kwargs={"encoding_format": "float"},
         request_timeout=30,
         max_retries=0,
+        http_client=http_client,
     )

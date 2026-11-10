@@ -7,11 +7,13 @@ from unittest.mock import Mock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite import SqliteSaver
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from shopcare.agent import agent
+from shopcare.api.dependencies import initialize_agent_checkpoint
 from shopcare.db import build_engine, init_db
 from shopcare.db.models import Conversation, PolicyChunkRecord, PolicyEmbeddingRecord, User
 from shopcare.scripts.seed import seed_demo_data
@@ -152,6 +154,87 @@ def answer_message(status="answered", citation_ids=None):
             ensure_ascii=False,
         )
     )
+
+
+def test_execute_graph_accepts_initialized_first_turn_and_resumes_after_reopen(
+    conversation_graph_context,
+):
+    engine, thread_id, embedding, path = conversation_graph_context
+    first_client = Mock()
+    first_client.bind_tools.return_value.invoke.return_value = answer_message(
+        "needs_clarification", []
+    )
+    with SqliteSaver.from_conn_string(path) as saver, Session(engine) as session:
+        initialize_agent_checkpoint(saver, thread_id)
+        first = agent.execute_conversation_graph(
+            session,
+            first_client,
+            embedding,
+            saver,
+            "U001",
+            thread_id,
+            date(2026, 11, 2),
+            "订单O004的O004-I01耳机坏了",
+        )
+        assert first.status == "needs_clarification"
+    second_client = Mock()
+    second_client.bind_tools.return_value.invoke.side_effect = [policy_request(), answer_message()]
+    with SqliteSaver.from_conn_string(path) as saver, Session(engine) as session:
+        second = agent.execute_conversation_graph(
+            session,
+            second_client,
+            embedding,
+            saver,
+            "U001",
+            thread_id,
+            date(2026, 11, 2),
+            "左边没声音",
+        )
+        assert second.citation_chunk_ids == ["digital:v1:000"]
+        saved = saver.get_tuple({"configurable": {"thread_id": thread_id}})
+        assert saved.metadata["step"] != -1
+        assert saved.checkpoint["channel_values"]["model_calls"] == 2
+        assert [
+            m.content
+            for m in saved.checkpoint["channel_values"]["messages"]
+            if isinstance(m, HumanMessage)
+        ] == ["订单O004的O004-I01耳机坏了", "左边没声音"]
+    embedding.embed_query.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "override",
+    [{"source": "loop"}, {"step": 0}, {"shopcare_initialized": False}, {}],
+)
+def test_execute_graph_rejects_empty_checkpoint_without_complete_initialization_marker(
+    conversation_graph_context, override
+):
+    engine, thread_id, embedding, path = conversation_graph_context
+    client = Mock()
+    metadata = {"source": "input", "step": -1, "parents": {}}
+    if override:
+        metadata["shopcare_initialized"] = True
+        metadata.update(override)
+    with SqliteSaver.from_conn_string(path) as saver, Session(engine) as session:
+        saver.put(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            empty_checkpoint(),
+            metadata,
+            {},
+        )
+        with pytest.raises(ValueError, match="历史不完整"):
+            agent.execute_conversation_graph(
+                session,
+                client,
+                embedding,
+                saver,
+                "U001",
+                thread_id,
+                date(2026, 11, 2),
+                "耳机坏了",
+            )
+    client.bind_tools.return_value.invoke.assert_not_called()
+    embedding.embed_query.assert_not_called()
 
 
 def test_execute_graph_restores_history_and_uses_real_tools_for_new_turn(
@@ -314,7 +397,7 @@ def test_execute_graph_rejects_failed_run_and_blocks_following_model_call(
     else:
         invoke.side_effect = [policy_request(f"policy-{index}") for index in range(3)]
     with SqliteSaver.from_conn_string(path) as saver, Session(engine) as session:
-        with pytest.raises(ValueError):
+        with pytest.raises(TimeoutError if failure == "timeout" else ValueError):
             agent.execute_conversation_graph(
                 session,
                 client,
@@ -466,7 +549,9 @@ def test_run_turn_marks_failure_and_blocks_following_request(run_context, failur
         ]
     else:
         invoke.side_effect = [policy_request(f"policy-{index}") for index in range(3)]
-    with pytest.raises(RuntimeError if failure == "bind" else ValueError):
+    with pytest.raises(
+        RuntimeError if failure == "bind" else TimeoutError if failure == "timeout" else ValueError
+    ):
         agent.run_conversation_turn(**run_context)
     with Session(run_context["engine"]) as session:
         assert session.get(Conversation, run_context["conversation_id"]).status == "failed"

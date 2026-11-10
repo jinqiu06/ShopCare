@@ -1,9 +1,14 @@
+from httpx import Client
 from langchain_openai import ChatOpenAI
 
 from shopcare.core.config import Settings
 
 
-def build_chat_client(settings: Settings) -> ChatOpenAI:
+def build_chat_client(
+    settings: Settings,
+    *,
+    http_client: Client | None = None,
+) -> ChatOpenAI:
     if settings.llm_api_key is None or not settings.llm_api_key.get_secret_value().strip():
         raise ValueError("未配置对话模型 API Key")
     if not settings.llm_model_id or not settings.llm_model_id.strip():
@@ -18,4 +23,5 @@ def build_chat_client(settings: Settings) -> ChatOpenAI:
         temperature=0,
         timeout=30,
         max_retries=0,
+        http_client=http_client,
     )

@@ -19,7 +19,7 @@ settings = Settings()
 async def lifespan(app: FastAPI):
     engine = build_engine(settings.database_url)
     app.state.engine = engine
-
+    app.state.settings = settings
     try:
         yield
     finally:

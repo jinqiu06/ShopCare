@@ -7,6 +7,14 @@ from sqlalchemy.orm import Session
 from shopcare.db.models import Conversation, User
 
 
+class ConversationTurnConflictError(RuntimeError):
+    """会话当前不可领取新的执行轮次。"""
+
+
+class ConversationNotFoundError(LookupError):
+    """The requested conversation is absent or belongs to another user."""
+
+
 def create_conversation(
     session: Session,
     user_id: str,
@@ -60,7 +68,7 @@ def start_conversation_turn(
         conversation_id,
     )
     if conversation is None:
-        raise LookupError("会话不存在或不可访问")
+        raise ConversationNotFoundError("会话不存在或不可访问")
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -80,7 +88,7 @@ def start_conversation_turn(
 
     result = session.execute(statement)
     if result.rowcount != 1:
-        raise RuntimeError("会话当前不可执行")
+        raise ConversationTurnConflictError("会话当前不可执行")
 
     session.refresh(conversation)
 
@@ -102,7 +110,7 @@ def finish_conversation_turn(
         conversation_id,
     )
     if conversation is None:
-        raise LookupError("会话不存在或不可访问")
+        raise ConversationNotFoundError("会话不存在或不可访问")
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 

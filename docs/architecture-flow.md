@@ -1,6 +1,6 @@
 # ShopCare 结构与运行流程
 
-核对日期：2026-11-09。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
+核对日期：2026-11-10。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
 
 ## 当前状态
 
@@ -11,7 +11,7 @@
 - Agent独立演示入口为scripts/run_agent.py：默认只预览，--run才执行图，并在结束后校验PolicyAnswer及引用来源；现有HTTP和answer_order仍走固定链路。
 - 持久化会话入口为scripts/chat_agent.py：新建或按conversation_id继续，由服务端校验归属、取得内部线程，逐轮保存状态并校验本轮引用；默认只预览。
 - Agent内部回答现在要求policy_quotes原文摘录：本轮来源、连续原文和引用编号覆盖均校验后，仍返回四字段PolicyAnswer；已做离线验证，11月9日新版真实模型试跑待确认。旧会话缺少此字段时CLI提示新建并保留原历史；固定HTTP回答链路未接此新检查。
-- 会话HTTP已注册POST /api/conversations和GET /api/conversations/{conversation_id}，提供创建及按归属查询，仅公开id/status/as_of，不调用模型或创建checkpoint。消息路由尚未接入；不存在/越权统一404，数据库错误503。
+- 会话HTTP已注册POST /api/conversations和GET /api/conversations/{conversation_id}，仅公开id/status/as_of。创建时登记空checkpoint，查询不访问保存器，两者不调用模型。消息路由POST /api/conversations/{conversation_id}/messages已接入服务与Graph，并通过模拟模型两轮HTTP验证；不存在/越权统一404，数据库及保存器故障503。
 
 ## 目录职责
 
@@ -246,8 +246,11 @@ Set-Location D:\VsCode\ShopCare
 | agent/prompts.py | `build_agent_messages`：构造初始系统规则与用户消息；`build_turn_reminder`：只列本轮证据的临时模型调用提醒，两个Agent CLI启用 |
 | agent/results.py | `collect_policy_evidence`：提取本次成功政策工具证据；`parse_agent_answer`：完成状态/最终消息/本轮引用校验；`validate_consultation_answer`：有限的明确执行承诺拦截；`validate_policy_quotes`：片段编号/连续原文摘录校验；`parse_agent_policy_answer`：内部JSON/摘录覆盖校验后返回PolicyAnswer；均已接两个Agent CLI，未接固定HTTP |
 | agent/__init__.py | 包声明，无函数、无核心调用 |
-| api/dependencies.py | `get_session`, `get_current_user_id` |
-| api/conversations.py | `create_conversation_api`：短事务创建；`read_conversation`：复用get_conversation_for_user按归属查询；均返回三字段ConversationResponse，已注册main |
+| api/dependencies.py | `get_session`, `get_current_user_id`；兼容导出保存器函数，实现已迁移到 agent/checkpoints.py |
+| agent/checkpoints.py | `open_agent_checkpointer`：文件隔离与连接管理；`initialize_agent_checkpoint`：登记空检查点；创建接口已调用，消息服务已复用但消息路由已注册并通过两轮HTTP离线验证 |
+| services/conversation_messages.py | `get_ready_conversation_thread`：短Session授权及状态预检；`send_message`：预期故障分类；`_send_message`：保存器/客户端资源与既有轮次入口编排；`ConversationMessageError.__init__`：记录应用错误码，无HTTP依赖 |
+| api/errors.py | `conversation_message_http_error`：统一消息错误码到HTTP状态及公开提示的映射；原有全局响应处理器保留 |
+| api/conversations.py | `create_conversation_api`：短事务创建；`read_conversation`：按归属查询；两者已注册main。`send_conversation_message`：已接归属/状态/检查点检查、请求级HTTP客户端与run_conversation_turn；完整执行错误映射待补，未注册 |
 | api/errors.py | `http_error_handler`, `validation_error_handler` |
 | api/health.py | `get_status` |
 | api/orders.py | `read_orders`, `read_order`, `read_order_items`, `answer_order` |
@@ -268,7 +271,7 @@ Set-Location D:\VsCode\ShopCare
 | services/llm.py | `build_chat_client` |
 | services/order_answers.py | `get_order_answer_context`, `answer_order_question` |
 | services/orders.py | `get_order_for_user`, `list_orders_for_user`, `get_order_items_for_user` |
-| services/conversations.py | `create_conversation`, `get_conversation_for_user`, `start_conversation_turn`, `finish_conversation_turn`：已供多轮agent入口及chat_agent CLI使用；未接会话HTTP |
+| services/conversations.py | `create_conversation`, `get_conversation_for_user`, `start_conversation_turn`, `finish_conversation_turn`：创建/查询已接HTTP，多轮入口及消息服务复用状态事务；消息路由已注册并通过两轮HTTP离线验证 |
 | services/policies/chunker.py | `split_policy` |
 | services/policies/embeddings.py | `embed_policy_chunks`, `save_policy_embeddings`, `load_policy_embeddings` |
 | services/policies/filter.py | `is_policy_effective`, `filter_applicable_policies` |
@@ -845,3 +848,134 @@ flowchart LR
 ```
 
 新增测试test_read_conversation_returns_owned_record_without_changing_it、test_read_conversation_missing_and_unowned_return_identical_404、test_read_conversation_database_failure_returns_safe_503，9组查询情形，与创建10组合计19组。它们属于HTTP验证，不增加业务图节点。旧章节所写查询未接入已由本节更新；发送消息及会话Graph HTTP尚未实现，创建记录不等于已经运行Agent。
+
+## 消息请求模型（消息HTTP仍未接入）
+
+schemas/conversations.py新增ConversationMessageRequest及reject_blank字段校验方法，query限制1–1000字符并去首尾空白、拒绝空白及额外字段。直接验证输入边界及Ruff/格式通过。新增运行方法reject_blank目前仅用于独立模型校验，没有消息HTTP路由调用它。
+
+下一步send_conversation_message仅规划可信身份/短Session/归属与ready状态预检，不加路由装饰器；真正轮次领取仍由run_conversation_turn负责。持久化资源、首轮和丢失checkpoint区分、执行错误映射及两轮HTTP验收仍未实现，本节不改变已可用的创建/查询接口。
+
+## 检查点连接管理（独立函数，尚未接消息HTTP）
+
+用户本次授权助手实现api/dependencies.py的open_agent_checkpointer(engine, checkpoint_db, *, create=False) -> Iterator[SqliteSaver]，由contextmanager包装。它只读取engine.url以检查SQLite业务文件路径，不访问业务表；路径不得与业务库同文件，create模式可建父目录，默认模式拒绝缺文件，with SqliteSaver.from_conn_string创建连接并yield给外层，外层正常/异常结束均关闭连接。不创建会话或checkpoint记录，不调用模型。仍未接入send_conversation_message。
+
+调用关系：调用方with → 路径/文件隔离检查 → SqliteSaver.from_conn_string → yield保存器 → 调用方代码块 → 退出上下文并关闭连接。不是FastAPI自动注入的依赖，后续应在归属校验完成后显式使用。
+
+新增测试文件backend/tests/api/test_dependencies.py的business_engine、test_checkpointer_closes_on_success_or_body_failure、test_checkpointer_rejects_blank_path、test_checkpointer_missing_file_does_not_create_directories、test_checkpointer_rejects_business_database_alias_before_opening、test_checkpointer_rejects_same_business_file_through_hard_link、test_checkpointer_allows_separate_file_with_in_memory_business_database仅用于验证。保存器9组加会话接口19组共28项通过，不混入业务运行图。消息接口整体仍未完成。
+
+## 空检查点初始化（独立验证，未接HTTP）
+
+api/dependencies.py新增initialize_agent_checkpoint(checkpointer: SqliteSaver, thread_id: str) -> None，由开发者实现。已有保存器 → 校验线程ID → 主图namespace配置 → get_tuple存在则拒绝 → put(empty_checkpoint, 初始化元数据) → 返回None。不管理连接、不调用模型，也不创建业务会话。元数据使用source=input、step=-1、shopcare_initialized=True标识明确登记的新会话；尚未接创建路由或完整执行函数。
+
+新增测试test_initialize_checkpoint_persists_marker_and_keeps_other_threads_independent、test_initialize_checkpoint_refuses_to_replace_existing_graph_history、test_initialize_checkpoint_rejects_blank_thread_id，共4组，保存器相关累计13项通过。测试原始图get_state看到{'messages': []}和初始化标记，不表示完整编排已经接受此状态；execute_conversation_graph的首轮识别仍需后续修改。
+
+## 已登记空检查点的首轮执行识别
+
+execute_conversation_graph已由开发者加入initialized_empty条件：值恰为{'messages': []}且元数据为source=input、step=-1、shopcare_initialized=True时，允许首轮消息构造；其他已有但空/损坏历史仍按原规则拒绝。snapshot.next检查先于该分支，非空历史继续校验上一轮自身证据。该调整不增加函数或图节点。
+
+新增验证test_execute_graph_accepts_initialized_first_turn_and_resumes_after_reopen、test_execute_graph_rejects_empty_checkpoint_without_complete_initialization_marker，使用Mock外部模型与真实临时工具/数据库；编排和保存器58项通过。会话API测试夹具隔离新检查点路径后19项通过。HTTP创建/消息尚未接此机制，底层对没有checkpoint的旧首轮兼容行为仍存在，因此未来HTTP必须显式要求对应记录存在。
+
+## 创建会话登记空检查点（已接入，消息HTTP仍待完成）
+
+lifespan已由开发者将既有Settings放入app.state。create_conversation_api读取同一配置，创建业务记录后在事务提交前用open_agent_checkpointer(create=True)与initialize_agent_checkpoint登记thread_id对应的空状态，再构造ConversationResponse并提交。保存器/文件/配置错误与业务数据库异常统一503，事务上下文回滚业务记录。此流程不调用模型。
+
+当前调用链：POST → Session.begin → create_conversation → open_agent_checkpointer → initialize_agent_checkpoint → 关闭保存器 → 构造响应 → 提交业务记录 → 201。checkpoint与业务库不是分布式事务，业务提交失败可能保留孤立初始化记录；不会为回滚而删除其他会话的checkpoint。
+
+既有创建测试验证重开保存器后初始化标记与thread隔离，新增test_create_conversation_checkpoint_failure_rolls_back_business_record覆盖3种资源失败；API和保存器35项通过。消息路由尚未注册，下一步须先检查thread对应记录存在，防止把缺失历史当首轮。
+
+## 模型客户端支持调用方HTTP连接（消息作用域尚未接入）
+
+services/llm.py的build_chat_client与services/embeddings.py的build_embedding_client新增可选关键字http_client: httpx.Client | None = None，并传给对应LangChain SDK构造器；旧调用保持默认行为。调用方传入Client时负责关闭它，两个工厂不关闭共享资源。HTTPx从既有开发依赖移为运行依赖，无新版本安装。
+
+新增验证文件test_model_clients.py的test_model_factory_accepts_caller_owned_http_client_and_keeps_old_calls、test_model_factory_rejects_missing_credentials_before_sdk_construction，共6组通过，SDK均Mock，无外部请求。下一步消息接口应在保存器记录确认存在后，用请求级with Client管理SDK及完整轮次执行；当前仍未完成，不声明已开放消息HTTP。
+
+## 消息函数的请求级HTTP客户端管理（本地停止点，未注册端点）
+
+send_conversation_message已按用户本次授权调整：归属/ready预检并关闭查询Session → 打开保存器并确认thread记录存在 → with Client(timeout=30) → 两个工厂接收同一http_client → run_conversation_turn → 关闭HTTP连接及保存器 → 返回PolicyAnswer。SDK配置错误映射503，其他完整执行错误映射仍未补齐；本次不新增图节点或函数。
+
+新增验证test_unregistered_message_function_closes_request_resources、test_message_function_does_not_build_clients_when_checkpoint_file_missing，4组直接函数调用，仅Mock模型工厂及轮次入口，验证连接关闭及缺文件不构造客户端。OpenAPI中仍没有POST /api/conversations/{conversation_id}/messages，因此不声明HTTP两轮闭环已完成。
+
+全量697项离线测试通过，Ruff与84个Python文件格式检查通过。按用户要求今天到此，改动全部留本地，不提交不推送；完整错误映射、端点注册及HTTP真实业务调用链验证留待后续。未运行外部模型，新版真实效果验收依然待明确授权。
+
+## 11月10日：消息存储异常响应（仍未注册HTTP）
+
+send_conversation_message的保存器打开、记录检查与执行代码块现包在try内：FileNotFoundError先映射409 CONVERSATION_CHECKPOINT_MISSING，其他sqlite3.Error/OSError映射503 CONVERSATION_UNAVAILABLE；已有HTTPException直接传播，with继续释放资源。业务归属查询Session的SQLAlchemyError尚未映射；完整执行错误与并发冲突仍待处理。
+
+扩展既有test_message_function_does_not_build_clients_when_checkpoint_file_missing为缺文件/缺thread/权限/SQLite故障4组，API及保存器42项通过。测试直接调用未注册函数，不代表HTTP两轮验收。无新增运行函数、测试函数或图节点，无外部请求，本地不提交不推送。
+
+### 11月10日：消息前置查询错误处理
+
+send_conversation_message现将get_conversation_for_user所在短Session包入try，SQLAlchemyError→503 CONVERSATION_UNAVAILABLE；None→404与非ready→409保持原样，预检通过后才打开保存器和模型连接。未新增运行函数或路由。
+
+新增测试test_message_precheck_rejects_before_opening_resources（5组）仅属于验证，调用既有消息函数，覆盖数据库故障/缺记录/越权/running/failed，拒绝时不接后续资源和轮次入口，数据库状态与updated_at不变。会话API34项通过，未请求外部模型；消息HTTP仍未注册。
+
+### 11月10日：消息执行超时与上游错误
+
+send_conversation_message在run_conversation_turn调用处先捕获APITimeoutError/TimeoutError→504 AGENT_TIMEOUT，再捕获OpenAIError→502 AGENT_UPSTREAM_ERROR。异常响应提示查询会话状态；run_conversation_turn仍负责失败时尝试写failed，HTTP层不重复写状态。with退出继续关闭HTTP连接及保存器。
+
+扩展既有资源测试test_unregistered_message_function_closes_request_resources为6组，其中新增3组经真实轮次入口、Mock图执行抛错，验证failed状态、响应和两类连接释放。会话API37项通过，无新增函数或图节点，无外部请求。并发冲突及其余执行错误待处理，消息HTTP仍未注册。
+
+## 11月10日：按用户要求明确消息职责与异常边界
+
+本节替代前文逐步在API内增加try/except的消息函数实现说明。send_conversation_message现在只读取可信请求上下文、调用services.conversation_messages.send_message并将ConversationMessageError交给api.errors.conversation_message_http_error转换。消息函数仍无路由装饰器，没有开放新HTTP能力。
+
+```mermaid
+flowchart TD
+    A["send_conversation_message：未注册HTTP"] --> B["send_message：识别预期故障"]
+    B --> C["_send_message → get_ready_conversation_thread"]
+    C --> D["短Session按可信user_id查询归属/ready，返回thread_id"]
+    D --> E["ExitStack：打开保存器，检查thread记录"]
+    E --> F["共享HTTP Client → 两个模型工厂"]
+    F --> G["已有run_conversation_turn"]
+    G --> H["原子领取ready→running → Graph → ready/failed"]
+    H --> I["退出ExitStack：关闭HTTP与保存器 → PolicyAnswer"]
+    B -->|预期应用错误码| J["API统一映射404/409/502/503/504"]
+```
+
+- 新增文件agent/checkpoints.py：迁移原api/dependencies.py的open_agent_checkpointer、initialize_agent_checkpoint，实现与签名保持不变；api/dependencies.py保留兼容导出。文件调用LangGraph保存器，不调用其他业务服务，不请求模型。创建接口原调用继续有效。
+- 新增文件services/conversation_messages.py：get_ready_conversation_thread调用get_conversation_for_user；send_message调用_send_message并分类数据库、模型与明确会话异常；_send_message调用上述预检、open_agent_checkpointer、build_chat_client、build_embedding_client和run_conversation_turn；ConversationMessageError.__init__只保存应用错误码，不决定HTTP状态。
+- api/errors.py新增conversation_message_http_error：查固定映射返回HTTPException，无业务服务调用。services/conversations.py沿用开发者新增的ConversationTurnConflictError，新增ConversationNotFoundError以区分缺失/越权与其他LookupError，保留原基类兼容。原子领取机制没有重写。
+- 保存器打开阶段才捕获FileNotFoundError/OSError/ValueError/sqlite3.Error，首次get_tuple只捕获sqlite3.Error；不再用宽泛文件异常包住Agent执行。SDK构造的ValueError只在两个工厂处处理。执行阶段未知RuntimeError、FileNotFoundError和OSError保留原异常，不伪装成409或检查点故障。
+- ExitStack按相反顺序释放共享HTTP连接与保存器；执行不占用预检Session。业务状态提交仍由run_conversation_turn负责，检查点和业务库仍不构成原子事务，没有新增重试、幂等提交或恢复。
+- 测试继续使用原test_conversation_api.py，替换Mock位置到消息服务实际依赖；资源测试补充明确领取冲突409、执行期缺文件/系统错误不误分类三组。原有真实轮次入口的超时→failed及资源释放验证保留，无新增测试函数。
+
+本次最终验证：全后端711项离线测试通过（-W error），全后端Ruff及86个Python文件格式检查通过。无真实模型效果验收。
+
+## 11月10日：消息HTTP注册与两轮离线验收（当前入口）
+
+开发者为send_conversation_message添加POST /api/conversations/{conversation_id}/messages与response_model=PolicyAnswer；助手仅整理导入/格式，补HTTP验证与文档。没有新增Python文件或业务函数，本节替代此前消息函数“未注册HTTP”的状态。
+
+```mermaid
+flowchart LR
+    H["POST /api/conversations/{id}/messages"] --> V["ConversationMessageRequest：只接收query"]
+    V --> A["send_conversation_message"]
+    A --> S["send_message → _send_message"]
+    S --> P["归属/ready → 已有checkpoint → 请求级客户端"]
+    P --> R["run_conversation_turn：原子领取 → Graph → ready/failed"]
+    R --> O["PolicyAnswer → HTTP 200"]
+    S -->|预期故障| E["统一错误码映射 → HTTP错误处理器"]
+```
+
+源码函数清单：send_conversation_message现为已注册运行入口，原服务、Graph与保存器函数无新增；前述总清单已更新消息路由状态。
+
+新增测试函数（仅验证，不加入运行图）：
+- test_message_http_rejects_invalid_body_before_service：6组缺字段/空白/超长/空值/覆盖身份/覆盖日期请求，经HTTP得到统一422且不调用send_message。
+- test_message_http_two_turns_persist_history_and_retrieve_current_evidence：复用现有临时库fixture，加入模拟政策片段/匹配向量，调用真实创建/消息/查询路由、消息服务、run_conversation_turn、Graph、工具和SQLite保存器；只有两个模型工厂返回Mock客户端。首轮needs_clarification不检索，第二轮读取首轮用户消息、去空白后调用实际政策工具并返回本轮有效引用，公开响应仅四字段，每轮状态回ready，检查点已持久化，两个HTTP请求的客户端独立且已关闭。
+
+既有test_message_function_closes_request_resources改名为test_message_http_closes_request_resources，经HTTP验证配置503、SDK/内置超时504、上游502、领取冲突409及资源释放；超时/上游仍真实领取后写failed。执行期文件/系统/未知RuntimeError由TestClient原样抛出，未被伪装成缺历史。缺检查点/权限/SQLite故障及归属/状态预检的已有9组也改为HTTP，含header/query身份覆盖无效。
+
+会话API文件47项通过。测试不是外部SDK或真实模型质量验收；未改演示库/政策/向量，没有加入重试、幂等性、自动恢复或长期记忆。当前完整调用链复盘：FastAPI解析query和可信user_id → API传engine/settings给消息服务 → 短Session预检 → 保存器已有历史检查 → 两工厂共享HTTP连接 → 原轮次入口领取执行权 → Graph工具循环和本轮引用校验 → 提交ready并返回PolicyAnswer → 释放资源 → HTTP四字段响应。
+
+最终全后端718项离线测试通过（-W error），全后端Ruff与86个Python文件格式检查通过。仅离线模拟模型验收，改动本地保留。
+
+### Swagger消息500：模型异常传播修复（11月10日）
+
+当前会话调用链补充：execute_conversation_graph → build_agent_graph(propagate_model_errors=True) → build_model_node同名参数 → invoke抛OpenAIError/TimeoutError时原样传播 → run_conversation_turn尝试写failed → send_message映射应用错误 → API返回502/504。此前节点吞错误导致parse_agent_answer报“未完成”而500；此路径已修复。默认propagate_model_errors=False，独立图/演示CLI的failed状态及报告行为保留，答案校验开关与异常传播开关分别表达不同职责。
+
+无新增函数或Python文件，源码函数清单中的build_agent_graph、build_model_node增加可选参数，execute_conversation_graph启用；已有HTTP资源测试现只Mock模型invoke，不再Mock整段Graph执行，验证真实异常传播路径。未改变调用预算、工具、引用校验、归属、原子领取或失败会话恢复策略。
+
+本次原失败会话checkpoint仅能证明第一轮模型节点失败，没有保存原始异常类别，不据此猜测具体网络/配置错误。重启本地服务、检查docs/会话GET，不重新发送真实模型请求，不修改旧failed状态或历史。
+
+### 11月10日网页验收与发布状态
+
+用户截图确认真实模型的会话HTTP首轮返回200/needs_clarification并要求补订单与商品编号，随后确认网页测试完成并授权提交推送。真实模型首轮连通性已验证；完整两轮政策检索/引用链路以模拟模型离线结果为准，不宣称全面真实效果验收。无新增函数。消息服务合并重复数据库异常捕获，映射行为保持不变。

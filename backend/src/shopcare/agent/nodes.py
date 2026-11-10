@@ -18,6 +18,7 @@ def build_model_node(
     tools: list[BaseTool],
     max_model_calls: int = 3,
     validate_answers: bool = False,
+    propagate_model_errors: bool = False,
 ):
     model = chat_client.bind_tools(tools)
 
@@ -39,6 +40,9 @@ def build_model_node(
                 )
                 response = active_model.invoke(request)
             except (OpenAIError, TimeoutError):
+                if propagate_model_errors:
+                    # Application entry points must receive the original provider error.
+                    raise
                 return {
                     **({"messages": updates} if updates else {}),
                     "model_calls": next_calls,
