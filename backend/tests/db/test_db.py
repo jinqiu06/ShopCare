@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from shopcare.db import build_engine, init_db
-from shopcare.db.models import Conversation, Order, OrderItem, User
+from shopcare.db.models import AfterSalesDraft, Conversation, Order, OrderItem, User
 
 
 @pytest.fixture
@@ -144,6 +144,7 @@ def test_init_registers_models_in_fresh_process():
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == [
+        "after_sales_drafts",
         "conversations",
         "order_items",
         "orders",
@@ -151,6 +152,71 @@ def test_init_registers_models_in_fresh_process():
         "policy_embeddings",
         "users",
     ]
+
+
+def make_draft(**overrides):
+    values = dict(
+        id="draft-1",
+        user_id="U001",
+        order_id="O001",
+        item_id="I001",
+        request_type="exchange",
+        reason="无法充电",
+        status="pending",
+        version=1,
+        as_of=date(2026, 11, 2),
+        created_at=datetime(2026, 11, 11, 8),
+        updated_at=datetime(2026, 11, 11, 8),
+        expires_at=datetime(2026, 11, 12, 8),
+    )
+    values.update(overrides)
+    return AfterSalesDraft(**values)
+
+
+@pytest.mark.parametrize("request_type", ["return", "exchange"])
+@pytest.mark.parametrize("status", ["pending", "cancelled"])
+def test_after_sales_draft_persists_across_connections(engine, request_type, status):
+    with Session(engine) as session, session.begin():
+        add_order(session)
+        session.add(make_item())
+        session.flush()
+        session.add(make_draft(request_type=request_type, status=status))
+    engine.dispose()
+    with Session(engine) as session:
+        draft = session.get(AfterSalesDraft, "draft-1")
+        assert (draft.user_id, draft.order_id, draft.item_id) == ("U001", "O001", "I001")
+        assert (draft.request_type, draft.status, draft.version) == (request_type, status, 1)
+        assert draft.reason == "无法充电"
+        assert draft.as_of == date(2026, 11, 2)
+        assert draft.created_at == draft.updated_at == datetime(2026, 11, 11, 8)
+        assert draft.expires_at == datetime(2026, 11, 12, 8)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"request_type": "refund"},
+        {"status": "submitted"},
+        {"version": 0},
+        {"reason": None},
+        {"user_id": "missing-user"},
+        {"order_id": "missing-order"},
+        {"item_id": "missing-item"},
+    ],
+)
+def test_after_sales_draft_rejects_invalid_record(engine, overrides):
+    with Session(engine) as session, session.begin():
+        add_order(session)
+        session.add(make_item())
+    engine.dispose()
+    with Session(engine) as session:
+        session.add(make_draft(**overrides))
+        with pytest.raises(IntegrityError):
+            session.flush()
+        session.rollback()
+    with Session(engine) as session:
+        assert session.get(AfterSalesDraft, "draft-1") is None
+        assert session.get(OrderItem, "I001") is not None
 
 
 def make_conversation(**overrides):

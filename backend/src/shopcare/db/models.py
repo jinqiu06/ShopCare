@@ -233,3 +233,75 @@ class Conversation(Base):
         DateTime,
         nullable=False,
     )
+
+
+class AfterSalesDraft(Base):
+    __tablename__ = "after_sales_drafts"
+
+    __table_args__ = (
+        CheckConstraint(
+            "request_type IN ('return', 'exchange')",
+            name="ck_after_sales_drafts_request_type",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'cancelled')",
+            name="ck_after_sales_drafts_status",
+        ),
+        CheckConstraint(
+            "version >= 1",
+            name="ck_after_sales_drafts_version_positive",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(50),
+        primary_key=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
+    order_id: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey("orders.id"),
+        nullable=False,
+    )
+    item_id: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey("order_items.id"),
+        nullable=False,
+    )
+    request_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+    reason: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    as_of: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )

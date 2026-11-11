@@ -615,3 +615,45 @@
 - 发布检查顺手合并消息服务重复的SQLAlchemyError捕获，保持现有SQLite/数据库503映射；无新增异常类、重试、函数或业务范围。README测试数更新为718。当前幂等性、自动恢复、长期记忆及售后写操作仍未实现。
 
 发布前最终检查：718项离线测试通过（34.74秒，-W error），Ruff/86文件格式及diff检查通过；23个待提交文件已检查，无已配置密钥或本机配置/数据库/私有存档。origin/main与提交前本地main一致，准备普通提交推送，不改写历史。
+
+## 11月11日计划：售后草稿业务基础（待实现）
+
+已核对main=7ff4471，开始时工作区干净。11月10日会话HTTP已提交，今日转向原需求中的售后草稿。按当前分工由开发者编写模型/业务服务，助手讲解、审查、补必要测试和文档，不因“继续推进”代写整套业务。
+
+今日范围：草稿持久化、创建、按归属查询及取消的服务小闭环；验收使用临时库，不创建正式售后申请、不调用模型、不改订单状态。正式确认、资格重校验、幂等提交与Agent工具接线后续单独实现；不放开当前Agent的咨询能力限制。草稿仅保存用户意向，不等于政策允许或平台已批准。
+
+第一步由开发者在既有db/models.py追加AfterSalesDraft，表名after_sales_drafts；初始设计见docs/data-model.md的11月11日章节。此类尚未实现，不运行本地演示库建表，不新增Python文件/业务函数。模型完成后助手用临时库核对约束，再指导create_after_sales_draft；服务层复用get_order_for_user/get_order_items_for_user，不重写订单隔离逻辑，事务由调用方管理。
+
+### 11月11日：AfterSalesDraft模型补全并验证
+
+用户完成大部分字段，明确授权助手补全剩余模型。助手在原db/models.py追加缺少的order_id外键、request_type/status/version三个CheckConstraint，并整理多行声明和尾逗号；保留用户已有字段，不增relationship/默认值或业务功能。模型已实现，与此前计划状态区分；尚无创建、查询、取消服务或HTTP/Agent入口。
+
+复用backend/tests/db/test_db.py，新增make_draft（只构造ORM对象，无核心服务调用）、test_after_sales_draft_persists_across_connections（4组）、test_after_sales_draft_rejects_invalid_record（7组）；复用已有engine/add_order/make_item。验证两种类型/两种状态重开连接保留，非法枚举/版本0/非空原因和三种无效外键被数据库拒绝，失败回滚不破坏已有商品。新进程建表清单补after_sales_drafts。该文件34项通过（-W error），相关Ruff/格式及diff检查通过，仅临时库，无新增Python文件或真实库DDL。
+
+下一步仍由开发者新建services/after_sales.py实现create_after_sales_draft，复用get_order_for_user/get_order_items_for_user做归属与商品匹配；只保存意向，不判定政策资格。签名传session、可信user_id、order_id、item_id、request_type、reason、as_of；拒绝非法类型/空白原因，LookupError统一不可访问；UUID编号，pending/version1，UTC创建/更新时间相同，expires_at=now+24小时，session.add/flush后返回，不commit。此函数/文件尚未创建，完成后补流程图和针对性服务测试。
+
+### 11月11日：创建草稿服务审查与局部修复
+
+开发者新建services/after_sales.py并实现create_after_sales_draft初稿。助手按持续局部修正授权修复三处：先判订单不可访问；用any判断指定商品是否在可信订单商品列表，避免循环变量未定义/错误放行；改为构造器传入完整字段，避免独立赋值尾逗号产生tuple，并补id/user_id/order_id/item_id/request_type/as_of。保留既有订单查询复用、参数校验及add/flush/return，未增加try-except或commit，未判政策资格。
+
+助手新增backend/tests/services/test_after_sales_service.py，draft_engine复用build_engine/init_db/seed_demo_data创建临时库；四个测试函数test_create_draft_persists_intent_without_changing_order、test_create_draft_rejects_inaccessible_context、test_create_draft_rejects_invalid_input、test_create_draft_leaves_commit_and_rollback_to_caller调用已有create_after_sales_draft，共10组。验证两种申请类型、UUID不同、去空白、初始状态/版本、UTC创建时间与24小时有效期、可信归属/商品匹配/输入拒绝、订单状态不变、独立连接看不到未提交数据与调用方回滚有效。
+
+服务与模型文件共44项通过（-W error），相关Ruff和格式通过。只用临时库，无模型请求/演示库写入，未提交推送。下一小步开发者在同文件添加get_after_sales_draft_for_user，按user_id和draft_id同时查询，返回ORM或None，不提交/修改状态；该查询函数尚未实现。取消与HTTP/Agent接线仍待完成。
+
+### 11月11日：按归属查询草稿验证完成
+
+开发者完成get_after_sales_draft_for_user，使用draft_id与可信user_id同时过滤，返回ORM或None；助手仅补尾逗号及整理格式，未添加异常或状态限制。pending/cancelled和已过期草稿均可查看，查询不更新version/时间或提交事务。
+
+复用test_after_sales_service.py新增test_read_draft_returns_owned_record_without_changing_it（2用户×2状态4组，包含过期记录可读）与test_read_draft_returns_none_for_both_missing_and_unowned（2组）。验证归属、缺失/越权同None、session无脏对象与重新读取字段不变。服务文件16项通过（-W error），相关Ruff/格式通过，无新Python文件、无模型调用或演示库变更。
+
+下一步开发者在同文件实现cancel_after_sales_draft(session,user_id,draft_id,expected_version)，复用归属查询，None→LookupError；用id/user_id/pending/expected_version条件UPDATE，成功写cancelled、version+1、UTC updated_at，rowcount非1→RuntimeError，refresh并返回。只flush/执行SQL，不commit，由调用方控制事务。过期草稿允许取消；过期限制针对后续确认，不需要为取消增加拦截。该函数尚未实现，不声明今日取消闭环完成。
+
+### 11月11日：取消服务审查与服务闭环完成
+
+开发者完成cancel_after_sales_draft初稿，where已同时限制id/user_id/pending/expected_version，values为cancelled/version+1/当前UTC时间，并refresh返回。遗漏执行结果检查会让未更新记录看似取消成功；助手补rowcount冲突检查、明确None判断及格式，保留原条件更新方案，不加try-except或commit。
+
+原test_after_sales_service.py增加4个取消测试函数共9组（函数清单已记architecture-flow.md），验证有效/过期取消、refresh与返回值、版本或状态冲突、越权/不存在、订单及诉求不变、提交可见性和回滚。服务25项/数据库34项合计59项通过，相关Ruff/格式通过。
+
+今天约定的AfterSalesDraft模型+创建/归属查询/取消业务服务闭环完成；当前无草稿HTTP/Agent入口、无确认/正式申请/幂等提交，未改演示数据库或调用外部模型。核心初稿由开发者实现，助手补已讲清的局部修正、模型约束及必要验证/文档。全量验证结果见后续记录，不自动扩展今天范围。
+
+11月11日最终全量验证：754项离线测试通过（41.11秒，-W error），全后端Ruff与88个Python文件格式检查通过。今日服务闭环验收完成，按AGENTS.md每日验收后的持续授权检查差异/敏感信息并提交推送。README更新可用服务范围与测试数，不把草稿服务表述为HTTP/Agent能力。

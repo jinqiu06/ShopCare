@@ -979,3 +979,61 @@ flowchart LR
 ### 11月10日网页验收与发布状态
 
 用户截图确认真实模型的会话HTTP首轮返回200/needs_clarification并要求补订单与商品编号，随后确认网页测试完成并授权提交推送。真实模型首轮连通性已验证；完整两轮政策检索/引用链路以模拟模型离线结果为准，不宣称全面真实效果验收。无新增函数。消息服务合并重复数据库异常捕获，映射行为保持不变。
+
+## 11月11日：售后草稿模型（服务尚未接入）
+
+db/models.py新增AfterSalesDraft表类，字段与约束见docs/data-model.md。开发者完成大部分字段，助手按本次授权补order_id与request_type/status/version约束；没有新增运行函数或入口，现有对话仍为咨询。
+
+当前关系：显式init_db → Base.metadata.create_all登记after_sales_drafts；仅在临时数据库验证，不改变HTTP生命周期或自动创建演示数据。create_after_sales_draft及API/Agent调用仍属计划，不画为当前可用能力。
+
+测试函数清单补充（原backend/tests/db/test_db.py，无新增文件）：make_draft只构造AfterSalesDraft对象，不调用核心业务；test_after_sales_draft_persists_across_connections复用engine/add_order/make_item并验证4组持久化；test_after_sales_draft_rejects_invalid_record验证7组枚举/版本/非空/外键失败及回滚。init新进程清单已更新，文件34项通过，相关Ruff/格式通过，无外部模型调用或演示库变更。
+
+## 11月11日：创建草稿业务服务（已独立验证，未接入口）
+
+源码函数清单新增services/after_sales.py的create_after_sales_draft(session, user_id, order_id, item_id, request_type, reason, as_of) → AfterSalesDraft。开发者实现初稿，助手审查并局部修正归属/匹配检查和完整字段构造。只保存意向，既不判政策资格也不创建正式申请，不改变订单状态，不调用模型。
+
+```mermaid
+flowchart LR
+    A["调用方持有Session和事务"] --> B["create_after_sales_draft：类型/空白原因校验"]
+    B --> C["get_order_for_user：可信user_id归属检查"]
+    C --> D["get_order_items_for_user：匹配item_id"]
+    D --> E["构造AfterSalesDraft：UUID/pending/version1/UTC时间/24小时有效期"]
+    E --> F["session.add → flush → 返回ORM"]
+    F --> G["调用方commit或rollback"]
+```
+
+无HTTP/CLI/Agent入口调用，图中调用方目前为临时库测试。as_of与创建时间分开；普通数据库外键不替代服务中的用户/订单/商品匹配。查询和取消服务尚未接入，今天的业务闭环尚未完成。
+
+新增测试文件backend/tests/services/test_after_sales_service.py：draft_engine调用build_engine/init_db/seed_demo_data；test_create_draft_persists_intent_without_changing_order、test_create_draft_rejects_inaccessible_context、test_create_draft_rejects_invalid_input、test_create_draft_leaves_commit_and_rollback_to_caller仅调用create_after_sales_draft作验证。10组服务测试加34组模型/数据库测试共44项通过，含事务未提交对其他连接不可见及调用方回滚，相关Ruff/格式通过。没有新Agent节点或外部请求。
+
+## 11月11日：按归属读取草稿（独立服务，尚未接HTTP）
+
+源码函数清单新增services/after_sales.py的get_after_sales_draft_for_user(session,user_id,draft_id) → AfterSalesDraft | None，由开发者实现。调用链：调用方Session → select(AfterSalesDraft)，id与user_id同时过滤 → session.scalar → ORM/None。不限制pending/cancelled或过期，不写状态、不提交；当前仅测试调用，无HTTP/Agent接线。
+
+验证说明新增test_read_draft_returns_owned_record_without_changing_it（4组）与test_read_draft_returns_none_for_both_missing_and_unowned（2组），复用原draft_engine与create_after_sales_draft，验证两个用户、两种状态、过期可读、缺失/越权None和查询无修改。服务文件16项通过，相关Ruff/格式通过，无新增Python文件。下一步取消服务尚未实现。
+
+## 11月11日：草稿取消服务与当前完整业务链
+
+源码函数清单新增services/after_sales.py的cancel_after_sales_draft(session,user_id,draft_id,expected_version) → AfterSalesDraft。开发者实现条件更新和refresh，助手按持续局部修正授权补result.rowcount != 1时RuntimeError，避免旧版本或重复取消静默成功；仅整理布局和None判断，无新异常体系或额外事务。
+
+```mermaid
+flowchart TD
+    A["调用方Session/事务"] --> C["create_after_sales_draft"]
+    C --> O["现有订单归属/商品匹配 → pending/version1 → add/flush"]
+    A --> R["get_after_sales_draft_for_user"]
+    R --> Q["id与可信user_id双条件 → ORM或None"]
+    A --> X["cancel_after_sales_draft"]
+    X --> R
+    X --> U["条件UPDATE：id/user_id/pending/expected_version"]
+    U -->|rowcount=1| V["cancelled/version+1/updated_at → refresh → ORM"]
+    U -->|rowcount非1| E["RuntimeError：状态或版本冲突"]
+    X -->|不可访问| N["LookupError"]
+    O --> T["调用方commit或rollback"]
+    V --> T
+```
+
+当前无HTTP/CLI/Agent调用，只有业务服务及测试。取消允许过期pending，拒绝重复取消（含当前版本）及旧版本；不更改订单、草稿诉求、创建/到期时间，也不提交正式申请。此版本条件更新不是正式申请的幂等提交，不宣称完整并发售后能力已实现。
+
+既有test_after_sales_service.py增加test_cancel_draft_updates_state_and_version_without_changing_intent（有效/过期2组）、test_cancel_draft_rejects_version_and_state_conflicts（3组）、test_cancel_draft_rejects_missing_and_unowned_records（3组）、test_cancel_draft_does_not_commit_and_caller_can_roll_back（1组）。调用真实创建/查询/取消服务及临时SQLite，验证refresh返回同一Session对象且字段已更新、独立连接提交可见或回滚保留pending，以及无效操作不修改时间/版本。没有新增Python文件；草稿服务25项加数据库34项共59项通过，相关格式/Ruff通过。
+
+本阶段最终全量754项离线测试通过（-W error），Ruff及88文件格式检查通过。无真实模型/演示数据库操作，今日服务闭环验收完成。
