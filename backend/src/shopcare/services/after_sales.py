@@ -11,6 +11,10 @@ from shopcare.services.orders import (
 )
 
 
+class DraftConflictError(RuntimeError):
+    """草稿状态或版本已变化。"""
+
+
 def create_after_sales_draft(
     session: Session,
     user_id: str,
@@ -96,7 +100,7 @@ def cancel_after_sales_draft(
 
     result = session.execute(statement)
     if result.rowcount != 1:
-        raise RuntimeError("草稿状态或版本已变化")
+        raise DraftConflictError("草稿状态或版本已变化")
 
     session.refresh(draft)
 

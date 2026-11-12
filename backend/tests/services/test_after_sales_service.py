@@ -9,6 +9,7 @@ from shopcare.db import build_engine, init_db
 from shopcare.db.models import AfterSalesDraft, Order
 from shopcare.scripts.seed import seed_demo_data
 from shopcare.services.after_sales import (
+    DraftConflictError,
     cancel_after_sales_draft,
     create_after_sales_draft,
     get_after_sales_draft_for_user,
@@ -211,7 +212,7 @@ def test_cancel_draft_rejects_version_and_state_conflicts(
         draft.status, draft.version = status, version
         draft_id, original_updated_at = draft.id, draft.updated_at
     with Session(draft_engine) as session, session.begin():
-        with pytest.raises(RuntimeError, match="草稿状态或版本已变化"):
+        with pytest.raises(DraftConflictError, match="草稿状态或版本已变化"):
             cancel_after_sales_draft(session, "U001", draft_id, expected_version)
     with Session(draft_engine) as session:
         saved = session.get(AfterSalesDraft, draft_id)

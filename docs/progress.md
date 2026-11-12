@@ -657,3 +657,61 @@
 今天约定的AfterSalesDraft模型+创建/归属查询/取消业务服务闭环完成；当前无草稿HTTP/Agent入口、无确认/正式申请/幂等提交，未改演示数据库或调用外部模型。核心初稿由开发者实现，助手补已讲清的局部修正、模型约束及必要验证/文档。全量验证结果见后续记录，不自动扩展今天范围。
 
 11月11日最终全量验证：754项离线测试通过（41.11秒，-W error），全后端Ruff与88个Python文件格式检查通过。今日服务闭环验收完成，按AGENTS.md每日验收后的持续授权检查差异/敏感信息并提交推送。README更新可用服务范围与测试数，不把草稿服务表述为HTTP/Agent能力。
+
+## 11月12日计划：草稿HTTP创建/查询/取消（待实现）
+
+起点dc3ddd6，工作区干净。已有AfterSalesDraft与create_after_sales_draft/get_after_sales_draft_for_user/cancel_after_sales_draft业务服务，754项为11月11日最终离线结果，本次不重复运行无变更测试。
+
+今日范围：接POST /api/after-sales/drafts、GET /api/after-sales/drafts/{draft_id}、POST /api/after-sales/drafts/{draft_id}/cancel；复用现有可信演示身份、Session依赖和三个服务，不重写业务校验。验收创建201、查询200、取消200/version递增、缺失/越权统一404、状态/版本冲突409、输入422、数据库故障安全响应和事务回滚。仅临时库，不调用模型、不自动给演示库建表、不扩展正式确认/提交、幂等性、恢复或Agent工具。
+
+第一小步开发者计划新建schemas/after_sales.py的AfterSalesDraftCreateRequest：order_id/item_id为1-50字符字符串，request_type为return/exchange，reason为1-1000字符，as_of为必填date；ConfigDict(extra=forbid,str_strip_whitespace=True)，不额外编写重复字符串校验器。不接收user_id/status/version/过期时间等服务端字段。as_of沿用演示参照日期约定，不作为生产可信时钟。该文件只定义数据结构，不调用业务服务，尚未创建。
+
+后续响应模型及取消请求模型、api/after_sales.py路由由开发者分步实现；助手讲解/审查、已讲清的局部修正及辅助测试/文档，按用户偏好在真实边界处理必要异常，不堆叠防御层。完成定义范围后收口，按现行每日发布约定处理。
+
+### 11月12日：创建草稿请求模型核对
+
+开发者新建schemas/after_sales.py的AfterSalesDraftCreateRequest，字段/约束与计划一致。助手仅整理缩进和空格，未新增校验器或业务函数。直接验证首尾空白清理及50/1000长度上界接受，19组非法情况拒绝：空白、超长、错误类型/日期、缺失各必填字段以及额外user_id/status/version/expires_at。相关Ruff/格式通过，未增加测试文件、运行模型或操作数据库。
+
+下一小步开发者在同文件增加AfterSalesDraftResponse，from_attributes=True，公开id/order_id/item_id/request_type/reason/status/version/as_of/created_at/updated_at/expires_at，不公开user_id。该模型尚未实现，取消请求和三个HTTP路由仍待实现，不声明草稿HTTP可用。
+
+### 11月12日：草稿响应模型核对
+
+开发者完成AfterSalesDraftResponse，from_attributes=True且公开11个约定字段，不含user_id；助手仅整理格式。用未落库AfterSalesDraft对象直接验证pending/cancelled两状态转换及日期序列化、精确字段白名单，并验证submitted/refund/version0三类非法输出拒绝。Ruff/格式通过，无数据库访问、模型请求、新文件或运行函数。
+
+下一步在同一schemas/after_sales.py由开发者添加AfterSalesDraftCancelRequest：ConfigDict(extra=forbid)，仅expected_version: int = Field(ge=1, strict=True)。拒绝0/负数、字符串/布尔版本及额外身份/状态字段，避免Pydantic默认将它们转换为整数。此请求模型尚未实现，三个HTTP路由仍未接入。
+
+### 11月12日：取消请求模型核对
+
+开发者完成AfterSalesDraftCancelRequest，extra=forbid，expected_version为严格正整数。助手仅补空行格式，直接验证正整数1/2/100接受与10组缺失/零/负数/字符串/布尔/浮点/空值/额外身份和状态字段拒绝；相关Ruff/格式通过，无新增测试文件、运行函数或数据库操作。
+
+下一小步开发者计划新建api/after_sales.py，APIRouter前缀/api/after-sales/drafts，POST空路径调用create_after_sales_draft。复用get_session/get_current_user_id，session.begin内创建并构造AfterSalesDraftResponse，提交成功才返回201；LookupError→404 ORDER_CONTEXT_NOT_FOUND，SQLAlchemyError→503 DRAFT_UNAVAILABLE，均固定公开提示、不回显底层异常。不添加多余客户端身份/版本判断或通用异常捕获。main注册与HTTP测试由助手审查后接入，此文件/路由尚未实现。
+
+### 11月12日：创建草稿HTTP接入与验证
+
+开发者完成api/after_sales.py的create_draft，参数/短事务/事务内响应转换正确。错误分支初稿返回含status_code/detail的dict，这不会设置HTTP错误状态，且不符合成功响应模型；助手按已讲清方案改raise HTTPException，LookupError→404 ORDER_CONTEXT_NOT_FOUND、SQLAlchemyError→503 DRAFT_UNAVAILABLE，固定消息且from None。main注册after_sales_router，创建路由现已可通过HTTP访问。仅局部修复/注册，未增加新业务规则或异常层。
+
+助手新建backend/tests/api/test_after_sales_api.py，client复用既有临时库/显式建表种子/lifespan模式，payload只提供请求数据；test_create_draft_http_commits_and_returns_public_fields（2用户×2类型4组）、test_create_draft_http_rejects_invalid_body_before_service（10组）、test_create_draft_http_hides_missing_and_unowned_context（3组）、test_create_draft_http_database_failure_rolls_back（flush/commit故障2组），共19项通过（-W error），相关Ruff/格式通过。测试调用真实HTTP与create_after_sales_draft，仅非法输入/故障注入处Mock。辅助fail_after_flush调用真实服务后抛SQL错误、fail_commit为Session事件，仅属于测试；无模型请求或演示库写入。
+
+验证独立连接可读提交、公开11字段无user_id、首尾空白清理、pending/version1与24小时有效期、可信身份不被header/query覆盖、缺失/越权/商品不匹配同404、输入422不进入服务、失败回滚且后续请求可用。下一步开发者在同文件实现GET /{draft_id}调用get_after_sales_draft_for_user，返回None→404 DRAFT_NOT_FOUND，数据库故障503 DRAFT_UNAVAILABLE，不写事务；查询与取消路由尚未实现。
+
+### 11月12日：查询草稿HTTP审查与验证
+
+开发者完成read_draft，查询调用正确，但将未找到记录写为裸except，None不会触发它且其他错误会被错误归为404。助手按既定方案改为SQLAlchemyError→503后独立if draft is None→404，去掉裸捕获、from None并整理格式。返回ORM交response_model转换，不修改记录或提交事务。
+
+既有test_after_sales_api.py新增test_read_draft_http_returns_owned_record_without_mutation（2用户×2状态4组，过期仍可查看）、test_read_draft_http_missing_and_unowned_return_same_404（2组）、test_read_draft_http_maps_only_database_errors（数据库/意外RuntimeError2组）。验证身份不受header/query覆盖、公开字段、读取不改变状态/版本/时间、缺失/越权同404、数据库503且意外错误不伪装成404。草稿API27项通过（-W error），相关Ruff/格式通过，只有临时库，无新文件/外部模型请求。
+
+下一步取消HTTP需要区分状态/版本冲突与程序错误：计划由开发者在services/after_sales.py定义DraftConflictError(RuntimeError)，只替换cancel_after_sales_draft中rowcount非1的raise，不改业务条件；API后续只捕获该明确类型为409。该异常类/取消路由尚未实现，不使用任意RuntimeError作为HTTP冲突。
+
+### 11月12日：草稿冲突专用异常验证
+
+开发者添加DraftConflictError(RuntimeError)，只替换cancel_after_sales_draft的rowcount非1分支，其他归属/更新逻辑不变。助手仅整理空行并将原冲突测试断言从RuntimeError收紧为DraftConflictError。草稿服务25项通过（-W error），相关Ruff/格式通过；无新增文件/业务检查/模型调用/演示库变更。
+
+下一步开发者在api/after_sales.py添加POST /{draft_id}/cancel，接AfterSalesDraftCancelRequest，可信user_id、Session.begin内调用取消服务并构造响应；LookupError→404 DRAFT_NOT_FOUND，DraftConflictError→409 DRAFT_CONFLICT，SQLAlchemyError→503 DRAFT_UNAVAILABLE。该路由尚未实现。
+
+### 11月12日：助手补全取消HTTP与当日收口
+
+用户明确授权“你给我补全吧”。助手在已有cancel_draft初稿上完成参数缩进、完整404/409/503与response返回，复用cancel_after_sales_draft，不新增业务规则或泛化异常框架。既有API文件增加5个取消/闭环测试函数共21组，辅助fail_after_update/fail_commit仅模拟失败；函数清单/调用图已记architecture-flow.md。草稿HTTP48项通过，全后端802项通过（43.05秒，-W error），全后端Ruff与91文件格式通过。
+
+今天范围全部完成：请求/响应/取消模型、草稿创建/归属查询/取消API、main注册、真实临时库HTTP验收和文档。核心模型及创建/查询路由由开发者写，助手修正已讲清问题、按本次授权补全取消路由并补测试/文档。没有真实模型请求或演示库建表/写数据，正式确认、幂等申请和Agent草稿工具未实现。按现行每日验收后持续授权检查差异/敏感信息并提交推送。
+
+用户指出感觉一直加功能、看不到整体进展。助手认可此前小步教学过碎、没有突出交付终点；对照原requirements及开发规划，后续优先收敛到正式确认/资格重校验/幂等申请→Agent串联→固定验收/演示，不继续默认扩展长期记忆、MCP、复杂恢复等。原规划后置项仍如实标为未完成，不因收敛就宣称全部原计划已实现。

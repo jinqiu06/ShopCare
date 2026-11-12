@@ -10,8 +10,8 @@
 - SQLAlchemy 模型包含外键、状态、非负金额和正数数量约束；SQLite 连接显式开启外键检查。
 - 提供可重复运行的模拟数据命令：2 名用户、20 笔订单、40 个商品项；已有记录不覆盖。
 - Pydantic 配置支持根目录 `.env` 和环境变量覆盖，缺少模型 Key 不影响订单查询。
-- 已实现售后意向草稿的创建、按归属查询和版本条件取消服务；尚未接HTTP/Agent，不创建正式申请。
-- 754 项离线测试（2026-11-11）覆盖配置、数据库、事务、服务/API、Agent、售后草稿、跨进程恢复、原文摘录校验及预算内回答纠正。
+- 已实现售后意向草稿的创建、按归属查询和版本条件取消服务及HTTP接口；尚未接Agent，不创建正式申请。
+- 802 项离线测试（2026-11-12）覆盖配置、数据库、事务、服务/API、Agent、售后草稿、跨进程恢复、原文摘录校验及预算内回答纠正。
 
 ## 环境与安装
 
@@ -58,6 +58,9 @@ Copy-Item .env.example .env
 | POST | `/api/conversations` | 创建会话，固定模拟参照日期并登记空检查点 |
 | GET | `/api/conversations/{conversation_id}` | 按当前用户归属读取会话状态和参照日期 |
 | POST | `/api/conversations/{conversation_id}/messages` | 发送问题，执行一轮Agent，返回PolicyAnswer |
+| POST | `/api/after-sales/drafts` | 创建待确认的售后意向草稿 |
+| GET | `/api/after-sales/drafts/{draft_id}` | 读取本人草稿，包含已取消或过期记录 |
+| POST | `/api/after-sales/drafts/{draft_id}/cancel` | 使用expected_version取消pending草稿 |
 
 limit 默认 20，范围 1–100；offset 默认 0，最小 0。参数不合法时返回 422。列表响应仍为数组，不包含总条数。
 
@@ -393,3 +396,11 @@ Agent内部最终JSON增加必填`policy_quotes`，每项为`chunk_id`与对应�
 不存在/越权404，非ready或缺历史409，输入422，配置/数据库/检查点打开故障503，模型超时504，上游SDK故障502。执行异常后通常写failed；若进程中断或收尾写库失败仍可能遗留running。未实现幂等重试、自动恢复或售后写操作，请先查询状态，不要把重复发送视为安全重试。
 
 验收仅使用临时SQLite及Mock模型客户端，实际运行HTTP、服务、Graph、工具检索和检查点，证明首轮澄清→第二轮加载历史并检索本轮政策证据、每轮结束ready和连接关闭。此前章节中的“会话HTTP未完成”描述为当时状态，以本节为准；未新增真实模型效果验收。
+
+## 售后草稿HTTP（2026-11-12，离线验收）
+
+POST /api/after-sales/drafts接收order_id、item_id、request_type（return/exchange）、reason与模拟参照日期as_of，服务端确定演示用户身份、pending状态、version=1及24小时有效期。响应201返回11个公开字段，不包含user_id。只保存申请意向，不代表符合政策或已正式提交。
+
+GET /api/after-sales/drafts/{draft_id}返回本人草稿；已取消、已过期的记录也可查看。POST /api/after-sales/drafts/{draft_id}/cancel接收 {"expected_version":1}，成功返回200/cancelled/version=2；状态或版本变化、重复取消返回409 DRAFT_CONFLICT。取消允许过期pending，不改变订单或执行退款。缺失/越权统一404，输入422，数据库故障503。普通程序错误不会一概伪装成404或409。
+
+路由复用既有三个草稿服务；写操作在Session.begin内调用服务并构造响应，提交成功后才返回，故障回滚。已用临时库验证创建→查询→取消→再次查询及回滚，无模型请求或演示库写入。现有数据库需显式init_db/初始化命令创建新增表，启动API不会自动建表。Agent仍只提供咨询，正式确认/幂等申请提交尚未实现。
