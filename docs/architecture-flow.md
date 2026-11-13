@@ -1092,3 +1092,59 @@ flowchart TD
 原test_after_sales_api.py新增test_draft_http_create_read_cancel_round_trip（两用户×有效/过期4组）、test_cancel_draft_http_rejects_state_and_version_conflicts（3组）、test_cancel_draft_http_missing_and_unowned_return_same_404（2组）、test_cancel_draft_http_rejects_invalid_body_before_service（9组）、test_cancel_draft_http_rolls_back_failures_and_maps_only_database_errors（3组）；内部fail_after_update调用真实取消服务后抛错误，fail_commit模拟Session提交失败，均只属于测试。此轮不新增Python文件。草稿API48项通过，验证状态/版本和持久化、无身份覆盖、响应白名单、输入拒绝、重复取消冲突、更新/提交故障回滚，程序RuntimeError原样传播。
 
 最终全后端802项通过（43.05秒，-W error），Ruff和91文件格式通过。今日HTTP闭环完成；无模型调用、真实库DDL或订单修改。下一主线为明确确认/资格重校验/正式申请幂等提交，再接Agent意向工具与固定验收，见开发规划末尾收敛说明。
+
+## 11月12日：Agent核心首轮源码审阅（无运行代码改动）
+
+已核对agent.py、graph.py、nodes.py、state.py，并读工具执行器、工具工厂、提示和结果校验及现有测试代码。本节只整理已实现机制与局限，不新增节点或函数，不将阅读测试当作新运行验证。
+
+- agent.py：run_conversation_turn负责业务执行权及ready/running/failed事务；execute_conversation_graph绑定可信工具、读取/校验checkpoint、准备本轮输入，调用图后只取本轮消息交parse_agent_answer。不是图节点本身。
+- graph.py：START→validate_start→model；route_after_model依据stop_reason=running进tools，否则END；route_after_tools同理决定回model或END。LLM选工具/参数，Python条件边控制允许的执行路径。
+- state.py：messages使用add_messages合并消息，有相同ID可替换而非单纯无条件append；model_calls/tool_calls为本轮累计计数，普通字段采用节点更新值；计数在新用户轮次重置，历史消息仍由checkpoint保留。
+- nodes.py：call_model提供工具schema并调用LLM，AIMessage.tool_calls只是请求；call_tools通过execute_tool验证工具名/输入并invoke，包装匹配tool_call_id的ToolMessage供下一次模型观察。一个call_model内部可能有多次候选修正调用，最多共享本轮3次预算。
+- 停止：无工具请求时可标completed，预算/失败也会结束图，但completed仍不等于可交付；外层parse_agent_answer检查结构、本轮证据、摘录与承诺规则。第三次模型若仍请求工具，工具节点因模型预算已满不再执行请求。
+- 当前不是全自主规划器，也不是只有固定顺序的单次问答；选工具通常由模型决定，但缺少本轮证据且候选未通过校验时，代码可能要求下一次调用search_order_policies。不要把受约束选择说成完全自由决策。
+
+学习验收先要求用户画出这条实际图并追踪一次model/tool计数与消息变化，再决定哪些代码需要完善。后续顺序以开发规划末尾“用户采纳的新主线”为准。保留基础实现，暂停外围接口扩展；本轮不推送。
+
+## 11月13日：核心验收执行器（离线词法基线已运行）
+
+新增数据data/eval/core_acceptance.json：30个政策检索问题（dev20/heldout10）与10个Agent案例。不是新业务功能，不接HTTP。已有prompts.py/tools/orders.py的用户修改保留，本轮未改业务算法。
+
+新增源码文件scripts/evaluate_core.py函数清单：RequestBudget.on_request限制共享HTTP客户端真实请求；score_ranking对政策版本去重评分；index_fingerprint记录语料/向量指纹；validate_cases在请求前校验标注与生效范围；evaluate_retrieval调用search_policy_chunks/search_semantic_policy_chunks并分离失败；inspect_turn检查模型状态、工具选择、引用相关性、越权工具成功和usage；evaluate_agent调用create_conversation→initialize_agent_checkpoint→run_conversation_turn，使用临时副本的真实事务/Graph/检查点；summarize_retrieval分mode/split/K汇总；write_report输出Markdown/JSON；main管理参数、只读快照/离线临时库、客户端生命周期、预算与输出。无新Agent节点、检索融合或阈值。
+
+```mermaid
+flowchart LR
+    C["固定标注案例 + 源码/语料指纹"] --> M["evaluate_core.main"]
+    M -->|默认离线| L["临时政策库 → 已有词法服务"]
+    M -->|--run且获授权| S["只读备份演示库 → 已有词法/语义服务"]
+    S --> A["临时会话/检查点 → 已有run_conversation_turn"]
+    L --> R["policy-version去重指标，错误单列"]
+    S --> R
+    A --> Q["状态/工具/引用自动检查 + 语义审查pending"]
+    R --> O["data/private/eval：逐题JSON + Markdown"]
+    Q --> O
+```
+
+新增测试文件tests/scripts/test_evaluate_core.py六个函数，分别验证手算指标、空相关分母、失败不等于空返回、预算前置阻断、默认无SDK构造、Mock客户端下实际Graph且原数据库不变。测试调用score_ranking/summarize_retrieval/RequestBudget/main及既有数据库初始化/种子函数。API/Graph的原测试仅兼容中英文冒号，不删除证据隔离断言。新增脚本和测试不代表真实模型质量提升。
+
+已实际运行30题词法基线：dev Hit@3=14/15、Recall@3=0.933、MRR@3=0.867；heldout 7/8、0.875、0.8125；7个负例空返回正确。语义/Agent真实运行待本轮授权，不能写为已完成。所有语义判定需人工审查，自动通过不等于政策解释正确。当前阶段产物是可复现验收基线与失败定位，后续是否改阈值/融合/切分取决于评估证据。
+
+本轮离线全量最终808项通过，Ruff与93文件格式通过。30题词法实际报告位于data/private/eval/2026-11-13-offline.md及JSON；语义与Agent真实评估未运行，待本轮API授权，不宣称当前效果提升或当日真实验收全部完成。
+
+### 11月13日本轮真实结果与执行器微调
+
+授权内累计30chat/41embedding，真实基线、标注复核及被撤回JSON实验见docs/core-acceptance-2026-11-13.md。实际检索服务与Agent算法未改；不把回放候选阈值或标注纠正当生产效果提升。
+
+evaluate_core.main预算允许0（硬禁止某类API）；evaluate_agent读取可选first_relevant，支持两轮首轮允许引用集，标注revision2仅修A02/A10首轮误判。无新增函数。原始Agent自动7/10，纠正标注同轨迹重评分9/10；语义人工审查仍2例无据条件、1例不可交付。全局JSON参数尝试因真实工具回归失败已撤回，模型工厂保持原先行为。
+
+下一改进应保留工具选择能力、针对最终输出格式验证，再单独验证政策语义；现有摘录校验不是通用语义验证。0.29仅缓存阈值候选，旧域外分数0.313175与有效问题0.314878重叠很近，未部署。所有原始轨迹和实验分开保留，不覆写基线。
+
+### 11月13日：最终候选格式修复分支（当前实现）
+
+修改现有nodes.py的build_model_node/call_model，无新运行函数：在validate_answers模式下，候选结构不符合AgentPolicyAnswer且仍有预算时才令require_final_json=True；下一次原chat.bind(response_format=json_object)无工具格式化。require_policy优先，正常选工具仍原bind_tools。所有尝试共享每轮3次预算，仍由既有parse_agent_answer验收，不生成兜底假答案。
+
+prompts.py的build_turn_reminder补当前证据/limitations/正文条件式要求，不加新的语义校验函数。全局JSON模式保持撤回，模型工厂不变。工具执行、计数、当前轮证据/摘录与权限机制不变。
+
+验证清单新增test_nodes.py三个测试：test_final_json_repair_uses_unbound_model_and_keeps_original_budget、test_invalid_json_repair_cannot_expand_model_call_budget、test_sdk_tool_selection_then_json_repair_does_not_require_strict_tools（内部respond仅模拟HTTP响应）。测试证明两类绑定不会混用、SDK无工具parse兼容及预算不扩张；不能代替真实模型效果。原有graph/agent/run_agent的非法JSON/缺字段Mock跟随分支调整。
+
+追加授权内真实4案例/5轮自动通过，最终正文条件式单案复测通过；不同提示指纹分别记录，语义仍有局限。详见docs/core-acceptance-2026-11-13.md，追加12chat/5embedding，原始库未改，不推送。

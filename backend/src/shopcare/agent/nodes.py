@@ -9,7 +9,7 @@ from openai import OpenAIError
 from shopcare.agent.prompts import build_turn_reminder
 from shopcare.agent.results import collect_policy_evidence, parse_agent_answer
 from shopcare.agent.state import AgentState
-from shopcare.schemas.answers import PolicyAnswer
+from shopcare.schemas.answers import AgentPolicyAnswer, PolicyAnswer
 from shopcare.tools.executor import execute_tool
 
 
@@ -28,16 +28,20 @@ def build_model_node(
         next_calls = state["model_calls"]
         updates = []
         require_policy = False
+        require_final_json = False
         while next_calls < max_model_calls:
             messages = [*state["messages"], *updates]
             request = [*messages, build_turn_reminder(messages)] if validate_answers else messages
             next_calls += 1
             try:
-                active_model = (
-                    chat_client.bind_tools(tools, tool_choice="search_order_policies")
-                    if require_policy
-                    else model
-                )
+                if require_policy:
+                    active_model = chat_client.bind_tools(
+                        tools, tool_choice="search_order_policies"
+                    )
+                elif require_final_json:
+                    active_model = chat_client.bind(response_format={"type": "json_object"})
+                else:
+                    active_model = model
                 response = active_model.invoke(request)
             except (OpenAIError, TimeoutError):
                 if propagate_model_errors:
@@ -74,6 +78,11 @@ def build_model_node(
                     )
                 except ValueError:
                     if next_calls < max_model_calls:
+                        try:
+                            AgentPolicyAnswer.model_validate_json(response.content)
+                            require_final_json = False
+                        except (ValueError, TypeError):
+                            require_final_json = True
                         try:
                             payload = json.loads(response.content)
                             # 仅用于决定是否要求检索；不能代替上面的严格五字段校验。

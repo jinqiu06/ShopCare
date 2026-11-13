@@ -12,7 +12,7 @@ from shopcare.services.orders import get_order_for_user
 def build_order_tools(session: Session, user_id: str, as_of: date):
     @tool(args_schema=OrderLookupInput)
     def lookup_order(order_id: str) -> dict:
-        """查询当前用户订单及服务端计算的签收天数；未知签收时间时天数为null。"""
+        """查询当前用户订单及服务端计算的签收天数;未知签收时间时天数为null。"""
         if not order_id.strip():
             return {
                 "ok": False,

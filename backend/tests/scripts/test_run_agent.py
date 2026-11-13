@@ -54,6 +54,7 @@ def agent_cli_context(tmp_path, monkeypatch):
     finally:
         engine.dispose()
     chat, embedding = Mock(), Mock()
+    chat.bind.return_value = chat.bind_tools.return_value
     embedding.model, embedding.dimensions = "mock-embedding", 2
     embedding.embed_query.return_value = [1.0, 0.0]
     monkeypatch.setattr(run_agent, "Settings", lambda: settings)

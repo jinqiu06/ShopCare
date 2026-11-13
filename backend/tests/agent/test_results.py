@@ -217,11 +217,11 @@ def test_turn_reminder_excludes_old_evidence_and_does_not_modify_history():
         ),
         ToolMessage(content=json.dumps({"ok": True, "data": [hit]}), tool_call_id="old"),
     ]
-    assert '片段ID为：["old-policy"]' in build_turn_reminder(messages).content
+    assert '片段ID为:["old-policy"]' in build_turn_reminder(messages).content.replace("：", ":")
     messages.append(HumanMessage(content="左边没声音"))
     original = list(messages)
     reminder = build_turn_reminder(messages)
-    assert "片段ID为：[]" in reminder.content
+    assert "片段ID为:[]" in reminder.content.replace("：", ":")
     assert "不能生成草稿" in reminder.content
     assert messages == original
 

@@ -363,9 +363,11 @@ def test_execute_graph_repairs_stale_citation_with_fresh_tools_within_turn_budge
         invoke = client.bind_tools.return_value.invoke
         assert invoke.call_count == 3
         assert client.bind_tools.call_args.kwargs == {"tool_choice": "search_order_policies"}
-        assert "片段ID为：[]" in invoke.call_args_list[0].args[0][-1].content
+        assert "片段ID为:[]" in invoke.call_args_list[0].args[0][-1].content.replace("：", ":")
         assert "未通过" in invoke.call_args_list[1].args[0][-2].content
-        assert '片段ID为：["digital:v1:000"]' in invoke.call_args_list[2].args[0][-1].content
+        assert '片段ID为:["digital:v1:000"]' in invoke.call_args_list[2].args[0][
+            -1
+        ].content.replace("：", ":")
         saved = saver.get_tuple({"configurable": {"thread_id": thread_id}}).checkpoint[
             "channel_values"
         ]
@@ -391,6 +393,7 @@ def test_execute_graph_rejects_failed_run_and_blocks_following_model_call(
         invoke.side_effect = TimeoutError("model timeout")
     elif failure == "invalid_json":
         invoke.return_value = AIMessage(content="invalid JSON")
+        client.bind.return_value = client.bind_tools.return_value
     elif failure == "retrieval":
         invoke.return_value = policy_request()
         embedding.embed_query.side_effect = TimeoutError("embedding timeout")
@@ -534,6 +537,7 @@ def test_run_turn_marks_failure_and_blocks_following_request(run_context, failur
         invoke.side_effect = TimeoutError("model timeout")
     elif failure == "invalid_json":
         invoke.return_value = AIMessage(content="invalid JSON")
+        client.bind.return_value = client.bind_tools.return_value
     elif failure == "retrieval":
         invoke.return_value = policy_request()
         run_context["embedding_client"].embed_query.side_effect = TimeoutError("retrieval timeout")

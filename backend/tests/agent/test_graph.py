@@ -189,6 +189,7 @@ def test_graph_corrects_invalid_excerpt_with_current_evidence_within_budget(grap
     elif failure == "missing_coverage":
         invalid["policy_quotes"] = []
     client = Mock()
+    client.bind.return_value = client.bind_tools.return_value
     client.bind_tools.return_value.invoke.side_effect = [
         tool_request(
             "search_order_policies",

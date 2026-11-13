@@ -1,12 +1,122 @@
+import json
 from unittest.mock import Mock
 
 import pytest
-from httpx import Request
+from httpx import Client, MockTransport, Request, Response
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.tools import StructuredTool
 from openai import APITimeoutError, OpenAIError
 
 from shopcare.agent.nodes import build_model_node, build_tool_node
 from shopcare.agent.results import parse_agent_answer
+from shopcare.core.config import Settings
+from shopcare.services.llm import build_chat_client
+
+
+def test_final_json_repair_uses_unbound_model_and_keeps_original_budget():
+    client = Mock()
+    client.bind_tools.return_value.invoke.return_value = AIMessage(content="请提供订单编号。")
+    client.bind.return_value.invoke.return_value = AIMessage(
+        content=json.dumps(
+            {
+                "status": "needs_clarification",
+                "answer": "请提供订单和商品编号。",
+                "citation_chunk_ids": [],
+                "limitations": [],
+                "policy_quotes": [],
+            }
+        )
+    )
+    state = {
+        "messages": [HumanMessage(content="鼠标充不进电")],
+        "model_calls": 0,
+        "tool_calls": 0,
+        "stop_reason": "running",
+    }
+    result = build_model_node(client, [], validate_answers=True)(state)
+    assert result["model_calls"] == 2
+    assert result["stop_reason"] == "completed"
+    client.bind.assert_called_once_with(response_format={"type": "json_object"})
+    client.bind_tools.assert_called_once_with([])
+    assert parse_agent_answer({**state, **result}).status == "needs_clarification"
+
+
+def test_invalid_json_repair_cannot_expand_model_call_budget():
+    client = Mock()
+    client.bind_tools.return_value.invoke.return_value = AIMessage(content="not JSON")
+    client.bind.return_value.invoke.return_value = AIMessage(content="still not JSON")
+    state = {
+        "messages": [HumanMessage(content="故障")],
+        "model_calls": 0,
+        "tool_calls": 0,
+        "stop_reason": "running",
+    }
+    result = build_model_node(client, [], validate_answers=True)(state)
+    assert result["model_calls"] == 3
+    assert client.bind_tools.return_value.invoke.call_count == 1
+    assert client.bind.return_value.invoke.call_count == 2
+    with pytest.raises(ValueError):
+        parse_agent_answer({**state, **result})
+
+
+def test_sdk_tool_selection_then_json_repair_does_not_require_strict_tools():
+    valid = json.dumps(
+        {
+            "status": "needs_clarification",
+            "answer": "请提供订单编号。",
+            "citation_chunk_ids": [],
+            "limitations": [],
+            "policy_quotes": [],
+        }
+    )
+    payloads = []
+
+    def respond(request):
+        payloads.append(json.loads(request.content))
+        content = "请提供订单编号。" if len(payloads) == 1 else valid
+        return Response(
+            200,
+            json={
+                "id": f"test-{len(payloads)}",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "test",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": content},
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    tool = StructuredTool.from_function(
+        func=lambda order_id: order_id, name="lookup_order", description="Test lookup"
+    )
+    with Client(transport=MockTransport(respond)) as http_client:
+        chat = build_chat_client(
+            Settings(
+                _env_file=None,
+                llm_api_key="test-only",
+                llm_model_id="test",
+                llm_base_url="https://example.invalid/v1",
+            ),
+            http_client=http_client,
+        )
+        state = {
+            "messages": [HumanMessage(content="故障")],
+            "model_calls": 0,
+            "tool_calls": 0,
+            "stop_reason": "running",
+        }
+        result = build_model_node(chat, [tool], validate_answers=True)(state)
+    assert len(payloads) == result["model_calls"] == 2
+    assert payloads[0]["tools"][0]["function"]["name"] == "lookup_order"
+    assert "response_format" not in payloads[0]
+    assert not payloads[1].get("tools")
+    assert payloads[1]["response_format"] == {"type": "json_object"}
+    assert parse_agent_answer({**state, **result}).status == "needs_clarification"
 
 
 @pytest.mark.parametrize("failure", ["corrected", "timeout", "invalid_again"])
