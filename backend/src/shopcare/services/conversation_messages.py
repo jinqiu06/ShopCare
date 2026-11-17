@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from shopcare.agent.agent import run_conversation_turn
 from shopcare.agent.checkpoints import open_agent_checkpointer
+from shopcare.agent.context import ContextLimitError
 from shopcare.core.config import Settings
 from shopcare.schemas.answers import PolicyAnswer
 from shopcare.services.conversations import (
@@ -52,6 +53,8 @@ def send_message(
         raise ConversationMessageError("CONVERSATION_NOT_FOUND") from error
     except ConversationTurnConflictError as error:
         raise ConversationMessageError("CONVERSATION_NOT_READY") from error
+    except ContextLimitError as error:
+        raise ConversationMessageError("AGENT_CONTEXT_TOO_LARGE") from error
     except (SQLAlchemyError, sqlite3.Error) as error:
         raise ConversationMessageError("CONVERSATION_UNAVAILABLE") from error
     except (APITimeoutError, TimeoutError) as error:

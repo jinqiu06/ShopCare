@@ -3,6 +3,7 @@ import re
 
 from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
+from shopcare.agent.after_sales import parse_after_sales_answer
 from shopcare.agent.state import AgentState
 from shopcare.schemas.answers import AgentPolicyAnswer, PolicyAnswer, PolicyQuote
 from shopcare.schemas.policy_models import SemanticPolicySearchHit
@@ -87,6 +88,9 @@ def parse_agent_answer(state: AgentState) -> PolicyAnswer:
         raise ValueError("最终回答不能包含工具调用请求")
     if not isinstance(message.content, str):
         raise ValueError("结果必须为JSON文本")
+    action_answer = parse_after_sales_answer(messages)
+    if action_answer is not None:
+        return action_answer
     evidence = collect_policy_evidence(messages)
     answer = parse_agent_policy_answer(message.content, evidence)
     validate_consultation_answer(answer)

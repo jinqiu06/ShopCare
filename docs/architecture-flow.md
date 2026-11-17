@@ -1,15 +1,15 @@
 # ShopCare 结构与运行流程
 
-核对日期：2026-11-12。图对应当前代码；新增函数时同步维护本文件的对应流程和函数清单。
+核对日期：2026-11-17。最新新增流程见文末；下方保留各阶段验证记录。
 
 ## 当前状态
 
-- 售后草稿创建/按归属查询/版本条件取消HTTP已接入并经临时库验证。正式确认、正式申请幂等提交及Agent草稿工具尚未实现。
+- 售后草稿、明确确认、提交前重查、模拟申请幂等登记和按归属查询已接HTTP。多轮Agent已接草稿准备/展示，完整确认/取消指令由代码处理；独立run_agent只读。未连接退款系统，本轮仅离线集成验收。
 
 - 已运行验证：订单 API、词法检索 API、政策导入、向量构建、语义检索和十题真实对照。
 - 单次回答CLI与HTTP入口均已接入并做离线验证。此前CLI真实试跑发现能力承诺和日期问题，最终日期修复仅做一个真实样例回归；本次未新增真实模型HTTP验证。
 - HTTP 搜索仍调用词法检索，已有 answer_order CLI 与 POST /api/orders/{order_id}/answer 回答路由。启动 FastAPI 不会自动运行回答函数。
-- 订单/政策工具及LangGraph有界循环已完成离线验收；会话归属、轮次事务及SQLite短期状态已接多轮CLI并做模拟模型跨进程验证。真实模型已跑通一组两轮样例：第二轮旧引用候选被纠正为本轮检索，明确只提供咨询；内容一致性仍有局限，尚未通过完整效果验收。会话HTTP、长期记忆和售后申请尚未完成。
+- 订单/政策工具及LangGraph有界循环、会话HTTP/CLI已接入。11月13日完成固定核心评估和有限格式修复，真实语义仍有局限。11月17日接入有限上下文、显式篇幅偏好以及对话售后闭环；最后一项尚无真实模型试跑，不能把Mock验证称为工具选择效果已验收。
 - Agent独立演示入口为scripts/run_agent.py：默认只预览，--run才执行图，并在结束后校验PolicyAnswer及引用来源；现有HTTP和answer_order仍走固定链路。
 - 持久化会话入口为scripts/chat_agent.py：新建或按conversation_id继续，由服务端校验归属、取得内部线程，逐轮保存状态并校验本轮引用；默认只预览。
 - Agent内部回答现在要求policy_quotes原文摘录：本轮来源、连续原文和引用编号覆盖均校验后，仍返回四字段PolicyAnswer；已做离线验证，11月9日新版真实模型试跑待确认。旧会话缺少此字段时CLI提示新建并保留原历史；固定HTTP回答链路未接此新检查。
@@ -251,8 +251,15 @@ Set-Location D:\VsCode\ShopCare
 | api/dependencies.py | `get_session`, `get_current_user_id`；兼容导出保存器函数，实现已迁移到 agent/checkpoints.py |
 | agent/checkpoints.py | `open_agent_checkpointer`：文件隔离与连接管理；`initialize_agent_checkpoint`：登记空检查点；创建接口已调用，消息服务已复用但消息路由已注册并通过两轮HTTP离线验证 |
 | services/conversation_messages.py | `get_ready_conversation_thread`：短Session授权及状态预检；`send_message`：预期故障分类；`_send_message`：保存器/客户端资源与既有轮次入口编排；`ConversationMessageError.__init__`：记录应用错误码，无HTTP依赖 |
+| services/memory.py | `is_memory_command`, `build_preference_context`, `apply_memory_command`：显式偏好指令、最新用户偏好读取、归属检查后更新 |
+| services/after_sales.py | `create_after_sales_draft`, `get_after_sales_draft_for_user`, `cancel_after_sales_draft`, `validate_submission_eligibility`, `confirm_after_sales_draft`, `get_after_sales_application_for_user`：草稿生命周期与明确确认后的幂等登记 |
+| api/after_sales.py | `create_draft`, `read_draft`, `cancel_draft`, `confirm_draft`, `read_application`：事务内服务调用及公开响应映射 |
+| db/models.py | `AfterSalesDraft.public_status`：有申请记录时对外submitted，原status列保留旧约束 |
+| agent/context.py | `build_model_context`, 内部 `size`：有限请求视图、完整轮次选择、序列化字符预算；不修改归档 |
+| tools/after_sales.py | `build_after_sales_tools`、内部 `prepare_after_sales_draft`：绑定用户/日期及本轮申请意向，仅准备草稿，不注册提交工具 |
+| agent/after_sales.py | `build_after_sales_answer`、`build_action_messages`、`parse_after_sales_answer`、`run_after_sales_command`：固定结果展示、可信回执校验、完整确认/取消/查看指令 |
 | api/errors.py | `conversation_message_http_error`：统一消息错误码到HTTP状态及公开提示的映射；原有全局响应处理器保留 |
-| api/conversations.py | `create_conversation_api`：短事务创建；`read_conversation`：按归属查询；两者已注册main。`send_conversation_message`：已接归属/状态/检查点检查、请求级HTTP客户端与run_conversation_turn；完整执行错误映射待补，未注册 |
+| api/conversations.py | `create_conversation_api`：短事务创建；`read_conversation`：按归属查询；`send_conversation_message`：复用消息服务与run_conversation_turn；三个路由均已注册 |
 | api/errors.py | `http_error_handler`, `validation_error_handler` |
 | api/health.py | `get_status` |
 | api/orders.py | `read_orders`, `read_order`, `read_order_items`, `answer_order` |
@@ -1148,3 +1155,97 @@ prompts.py的build_turn_reminder补当前证据/limitations/正文条件式要�
 验证清单新增test_nodes.py三个测试：test_final_json_repair_uses_unbound_model_and_keeps_original_budget、test_invalid_json_repair_cannot_expand_model_call_budget、test_sdk_tool_selection_then_json_repair_does_not_require_strict_tools（内部respond仅模拟HTTP响应）。测试证明两类绑定不会混用、SDK无工具parse兼容及预算不扩张；不能代替真实模型效果。原有graph/agent/run_agent的非法JSON/缺字段Mock跟随分支调整。
 
 追加授权内真实4案例/5轮自动通过，最终正文条件式单案复测通过；不同提示指纹分别记录，语义仍有局限。详见docs/core-acceptance-2026-11-13.md，追加12chat/5embedding，原始库未改，不推送。
+# 2026-11-17：有限上下文与显式偏好记忆
+
+```mermaid
+flowchart TD
+    E["现有 HTTP / CLI 对话入口"] --> R["run_conversation_turn：归属校验并领取 ready→running"]
+    R --> X["execute_conversation_graph：读取并校验 Checkpoint"]
+    X --> C{"is_memory_command"}
+    C -->|显式命令| M["apply_memory_command：验证源会话归属，保存/更新/查看/删除偏好"]
+    M --> T["提交业务事务 → graph.update_state：记录用户消息和合法确认回答"]
+    C -->|普通问题| P["build_preference_context：读取当前用户最新枚举偏好"]
+    P --> G["现有 Graph model 节点"]
+    G --> B["build_model_context：系统提示 + 最新偏好 + 最多两轮历史 + 完整当前轮 + 本轮提醒"]
+    B --> L["LLM；所有格式修正请求同样受限"]
+    L --> O["原工具循环 / 本轮证据校验 / Checkpoint"]
+    T --> F["原 finish_conversation_turn：成功 ready，异常 failed"]
+    O --> F
+```
+
+新增源码函数清单：
+
+- `services/memory.py::is_memory_command` 识别保留命令前缀；`build_preference_context` 读取按用户主键保存的偏好并输出固定系统文案；`apply_memory_command` 复用 `get_conversation_for_user` 校验源会话，只接受简短/详细枚举，调用方负责提交。
+- `agent/context.py::build_model_context` 及内部 `size`：按 HumanMessage 划分完整轮次，排除旧记忆命令轮，选择最多最近两轮；按消息序列化字符数（含工具参数）计数，超 32000 时先舍弃旧轮，当前轮仍超限则抛 `ContextLimitError`，SDK 不发送该次请求。保留原 Checkpoint，未实现摘要、订单锚点或磁盘修剪。
+- `UserPreference` 模型新增 `user_preferences` 表：用户主键、回答长度、来源会话、更新时间；无新 API、工具或 Agent 节点。
+
+已有调用变更：`execute_conversation_graph` 在构图时读取偏好；经历史校验后的命令直接更新状态，不 invoke 模型；普通轮将偏好通过 `build_agent_graph` 传入 `build_model_node`，每次调用和格式修正都执行 `build_model_context`。偏好系统消息只存在于请求视图，不写 Checkpoint，避免下一轮读到旧值。`send_message` 将上下文超限映射为 413；`evaluate_core.main` 在临时副本上 `init_db`，兼容升级前原库，不对原库建表。
+
+新增测试函数：`tests/services/test_memory.py::memory_setup`、`test_explicit_preferences_persist_update_delete_and_are_user_scoped`、`test_preference_write_rejects_foreign_conversation_and_unknown_values`、`test_memory_turns_resume_without_model_and_cross_conversation_reads_current_value`、`test_temporary_request_does_not_silently_save_preference`；`tests/agent/test_context.py` 的三个 `test_context_*` 验证完整轮与工具配对、字符预算、旧命令隔离、归档不变及超限前不调用 SDK；`tests/api/test_conversation_api.py::test_memory_commands_use_existing_http_route_and_skip_provider` 验证实际 HTTP 命令闭环。现有 HTTP 资源异常测试新增 413 映射分支，DB 新进程注册测试加入新表；原多轮测试增加最新偏好系统消息断言。
+
+边界：偏好仅控制篇幅，不赋予政策或执行权限；两个库无原子提交，业务偏好已提交而 Checkpoint 写失败时会话会 failed，不能据失败响应推断偏好未变。旧记忆原消息仍在归档；超窗口的细节不自动摘要或恢复。运行入口仍要求既有配置和新增表已显式初始化。
+
+## 2026-11-17：售后明确确认、重查与幂等提交
+
+```mermaid
+flowchart TD
+    C["POST drafts/id/confirm：版本 + confirmed=true + 用户自述事实"] --> T["API Session.begin"]
+    T --> L["confirm_after_sales_draft：先按用户与草稿取得 SQLite 写锁"]
+    L --> R{"该草稿已有申请？"}
+    R -->|相同版本和事实| OLD["返回原申请，过期或订单后续变化不影响结果重放"]
+    R -->|不同确认内容| CONFLICT["409"]
+    R -->|无| D["重查草稿状态、版本、有效期"]
+    D --> V["validate_submission_eligibility"]
+    V --> O["已有订单服务：归属、签收、商品关系"]
+    O --> P["list_effective_chunks：类别/日期过滤；匹配可执行政策ID/版本"]
+    P --> F["代码检查时限与必要用户声明，不判定质量已核实"]
+    F --> W["保存申请快照 pending_review + 草稿版本加一"]
+    W --> U["唯一 draft_id；两项写入同一事务"]
+    U --> COMMIT["提交后返回；异常回滚"]
+    OLD --> COMMIT
+    G["GET drafts/id/application"] --> Q["get_after_sales_application_for_user"]
+```
+
+新增运行函数均在已有文件：services/after_sales.py 的 `validate_submission_eligibility` 复用 `get_order_for_user`、`get_order_items_for_user`、`get_days_since_delivery` 和 `list_effective_chunks`；`confirm_after_sales_draft` 负责确认/重放/锁/写入，事务由调用方提交；`get_after_sales_application_for_user` 只读本人申请。api/after_sales.py 的 `confirm_draft`、`read_application` 已注册HTTP。models.py 的 `AfterSalesDraft.public_status` 用关联申请派生公开状态；`AfterSalesApplication` 唯一绑定draft_id、保存确认版本/证据/用户自述快照。schema新增 `AfterSalesFacts`、`AfterSalesConfirmRequest`、`AfterSalesApplicationResponse`，只做数据契约，不调用业务函数。无新Agent节点或工具。
+
+已有调用变化：`cancel_after_sales_draft` 的条件UPDATE增加“无申请记录”，与确认互斥；`AfterSalesDraftResponse` 优先读取public_status，兼容旧status列pending/cancelled，避免重建旧SQLite表。新表由显式init_db创建。幂等仅同一草稿及相同原确认内容；新草稿不是同一请求。模拟日期随创建后的UTC日历天数推进；已提交结果重放不重新判断当前资格。可执行规则窗口按已有六种政策ID/版本固定，未知或重叠版本拒绝，维护政策需同步维护对应规则。申请仍待处理，不代表执行退款或质量核实。
+
+新增验证文件 `tests/services/test_after_sales_submission.py`：辅助函数 `submission_context`、`confirmation`、`submit`；十个测试函数 `test_submit_saves_evidence_and_retry_returns_original_even_after_state_changes`、`test_submit_rechecks_current_state_and_leaves_no_partial_application`、`test_confirm_and_receipt_do_not_cross_user_boundary`、`test_return_requires_explicit_user_declarations`、`test_parallel_confirmations_produce_one_application`、`test_confirm_cancel_race_has_exactly_one_winner`、`test_insert_failure_rolls_back_draft_and_application`、`test_simulated_clock_advances_across_calendar_day`、`test_versioned_admission_boundaries`、`test_database_unique_constraint_prevents_second_application`；局部辅助 `confirm_at_once`、`race`、`fail_insert` 分别模拟真实并发与写入失败，全部使用临时库和已有导入/种子/草稿服务，不调用模型。
+
+既有API测试新增 `submission_policy` fixture、`test_confirm_http_lifecycle_replay_and_receipt_isolation`、`test_confirm_http_requires_explicit_typed_confirmation`、`test_confirmation_commit_failure_returns_no_receipt_and_rolls_back`，后者局部 `reject_commit`/`session_override` 注入提交失败；DB新进程注册断言新增申请表。全量860项通过（51.10秒，-W error），Ruff与98文件格式通过；Agent尚未调用确认服务，真实模型预算未使用。
+
+## 2026-11-17：多轮 Agent 接入售后闭环
+
+```mermaid
+flowchart TD
+    H["现有会话 HTTP / chat_agent"] --> S["run_conversation_turn：领取ready→running"]
+    S --> C["execute_conversation_graph：验证历史与本轮输入"]
+    C --> K{"确认提交 / 取消草稿 / 查看售后？"}
+    K -->|是| D["run_after_sales_command：匹配本会话pending草稿ID与版本"]
+    D --> B["原确认/取消/查询服务；独立业务事务"]
+    B --> R["build_action_messages：实际结果与固定回答 → Checkpoint"]
+    K -->|否| M["原Graph模型与订单/政策工具"]
+    M --> I{"本轮以申请售后：开头，且信息齐全？"}
+    I -->|否| A["原咨询/追问流程；不授权准备草稿"]
+    I -->|是| T["prepare_after_sales_draft：单独工具调用"]
+    T --> P["create_after_sales_draft + validate_submission_eligibility，同事务"]
+    P --> E["提交草稿 → 可信工具结果 → 固定展示；不再调用LLM"]
+    E --> U["pending_after_sales写Checkpoint，等待用户完整指令"]
+    R --> F["成功ready，异常failed；原轮次结束逻辑"]
+    U --> F
+    A --> F
+```
+
+新增文件/函数：
+
+- `tools/after_sales.py::build_after_sales_tools`、内部 `prepare_after_sales_draft` 复用原草稿创建与资格重查函数，使用独立Session.begin；仅“申请售后：”前缀授权准备，本轮意向由服务端绑定，不由工具参数覆盖。`AfterSalesPrepareInput` 定义于已有schemas/after_sales.py，只有订单/商品/诉求/原因和结构化用户声明，没有用户身份或参照日。
+- `agent/after_sales.py::build_after_sales_answer` 由实际工具/业务结果生成固定四字段回答；`build_action_messages` 记录服务端分发的合成工具调用、结果及合法五字段内部回答（不是LLM做出提交决定）；`parse_after_sales_answer` 只从最近HumanMessage之后匹配调用与结果，要求最终内容与固定回答完全相同，普通模型文本不能伪造业务回执。
+- `agent/after_sales.py::run_after_sales_command` 从Checkpoint读取最后待确认草稿/原版本/用户声明，仅完整且匹配的指令可复用原确认/取消服务；查看复用原草稿和申请查询。预期业务拒绝也记录固定回答并保持ready；数据库/Checkpoint故障沿原轮次异常路径处理。
+
+调用变更：execute_conversation_graph注册准备工具，检查快照后先分流明确操作命令；普通请求仍invoke原Graph。build_tool_node禁止准备工具与其他工具混批，成功后直接返回固定最终消息、completed及pending_after_sales，不消耗最后一次LLM润色。AgentState新增可选pending_after_sales，保留于Checkpoint且不因模型两轮历史窗口被裁掉。build_agent_messages和build_turn_reminder按当前工具能力区分多轮入口和只读入口，旧会话的只读提示由当前轮说明更新；格式修正提醒仍禁止自由文本冒充执行结论。
+
+parse_agent_answer新增可信业务结果分支，固定业务状态可answered且空政策引用；分支要求本轮匹配结果及固定全文，普通咨询仍走原引用/摘录/承诺校验。准备失败保留原模型追问路径。模型工具表只含lookup_order、search_order_policies、prepare_after_sales_draft；没有提交/取消工具，也不按模型生成的确认字样执行操作。
+
+新增验证 `tests/agent/test_after_sales.py`：fixture `sales_context` 与辅助 `preparation`、`clarification`、`prepare_turn` 复用已有种子、政策导入、会话及run_conversation_turn。测试函数：`test_retrieval_prepare_reopen_confirm_and_retry_use_actual_services`、`test_plain_ack_and_partial_confirmation_never_submit`、`test_cancel_is_persisted_and_later_confirmation_is_rejected`、`test_model_tool_request_cannot_bypass_intent_ownership_facts_or_batch_boundary`（四种实例）、`test_other_conversation_and_other_user_cannot_confirm_pending_draft`、`test_pending_checkpoint_survives_history_window_and_model_claims_are_not_receipts`、`test_confirmation_rechecks_changed_order_and_does_not_fail_conversation`、`test_checkpoint_failure_after_confirm_preserves_receipt_and_marks_failed`。既有API测试新增 `test_conversation_http_prepares_displays_confirms_and_replays_actual_application`，走实际HTTP→Graph→业务库→Checkpoint，Mock仅替换模型与向量客户端。
+
+验收：完整回归871项通过（60.28秒，-W error）；随后补充跨库故障测试，专项文件11项通过（含该新增项），未再次跑全量。用户明确选“本轮仅离线验证”，无外部模型请求，无真实工具选择效果结论。两个库仍无原子提交：故障测试证明业务申请可能已保存而会话failed，须通过已有申请查询接口确认；没有静默重试或自动恢复。幂等保证仍限于同一草稿的原确认内容；准备新草稿或替换pending目标不会自动合并为同一请求。

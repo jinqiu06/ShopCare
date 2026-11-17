@@ -280,7 +280,8 @@ def test_execute_graph_restores_history_and_uses_real_tools_for_new_turn(
             "订单O004的O004-I01耳机坏了，能换货吗？",
             "左边没声音",
         ]
-        assert len([m for m in model_input if isinstance(m, SystemMessage)]) == 2
+        assert len([m for m in model_input if isinstance(m, SystemMessage)]) == 3
+        assert "未保存回答长度偏好" in model_input[1].content
         graph = agent.build_agent_graph(second_client, [], checkpointer=saver)
         saved = graph.get_state({"configurable": {"thread_id": thread_id}}).values
         assert len(saved["messages"]) == 7

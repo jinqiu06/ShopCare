@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import JSON, CheckConstraint, Date, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shopcare.db.base import Base
 
@@ -302,6 +302,86 @@ class AfterSalesDraft(Base):
         nullable=False,
     )
     expires_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+
+    application: Mapped["AfterSalesApplication | None"] = relationship(
+        viewonly=True,
+        uselist=False,
+    )
+
+    @property
+    def public_status(self) -> str:
+        # The receipt is authoritative; existing SQLite draft constraints need no rebuild.
+        return "submitted" if self.application is not None else self.status
+
+
+class AfterSalesApplication(Base):
+    __tablename__ = "after_sales_applications"
+    __table_args__ = (
+        CheckConstraint("confirmed_version >= 1", name="ck_applications_confirmed_version"),
+        CheckConstraint("status = 'pending_review'", name="ck_applications_status"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(50),
+        primary_key=True,
+    )
+    draft_id: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey("after_sales_drafts.id"),
+        nullable=False,
+        unique=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
+    confirmed_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+    )
+    snapshot: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+    __table_args__ = (
+        CheckConstraint(
+            "response_length IN ('concise', 'detailed')",
+            name="ck_user_preferences_response_length",
+        ),
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey("users.id"),
+        primary_key=True,
+    )
+    response_length: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+    )
+    source_conversation_id: Mapped[str] = mapped_column(
+        String(50),
+        ForeignKey("conversations.id"),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
     )

@@ -1,20 +1,27 @@
 from datetime import date
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
+from shopcare.agent.after_sales import build_action_messages, run_after_sales_command
 from shopcare.agent.graph import build_agent_graph
 from shopcare.agent.prompts import build_agent_messages
 from shopcare.agent.results import parse_agent_answer
 from shopcare.agent.state import AgentState
-from shopcare.schemas.answers import PolicyAnswer
+from shopcare.schemas.answers import AgentPolicyAnswer, PolicyAnswer
 from shopcare.services.conversations import (
     finish_conversation_turn,
     start_conversation_turn,
 )
+from shopcare.services.memory import (
+    apply_memory_command,
+    build_preference_context,
+    is_memory_command,
+)
+from shopcare.tools.after_sales import build_after_sales_tools
 from shopcare.tools.orders import build_order_tools
 from shopcare.tools.policy import build_policy_tools
 
@@ -56,11 +63,20 @@ def execute_conversation_graph(
         raise ValueError("问题必须为1至1000个字符")
     query = query.strip()
 
-    tools = build_order_tools(session, user_id, as_of) + build_policy_tools(
-        session,
-        embedding_client,
-        user_id,
-        as_of,
+    tools = (
+        build_order_tools(session, user_id, as_of)
+        + build_policy_tools(
+            session,
+            embedding_client,
+            user_id,
+            as_of,
+        )
+        + build_after_sales_tools(
+            session.get_bind(),
+            user_id,
+            as_of,
+            allow_prepare=query.replace(":", "：").startswith("申请售后："),
+        )
     )
     graph = build_agent_graph(
         chat_client,
@@ -68,6 +84,7 @@ def execute_conversation_graph(
         checkpointer=checkpointer,
         validate_answers=True,
         propagate_model_errors=True,
+        preference_context=build_preference_context(session, user_id),
     )
     config = {"configurable": {"thread_id": thread_id}}
     snapshot = graph.get_state(config)
@@ -98,13 +115,46 @@ def execute_conversation_graph(
         parse_agent_answer(previous_turn)
 
     history_count = len(history)
-    messages = [HumanMessage(content=query)] if history else build_agent_messages(query, as_of)
+    messages = (
+        [HumanMessage(content=query)]
+        if history
+        else build_agent_messages(
+            query,
+            as_of,
+            allow_after_sales=True,
+        )
+    )
     state: AgentState = {
         "messages": messages,
         "model_calls": 0,
         "tool_calls": 0,
         "stop_reason": "running",
     }
+    action = run_after_sales_command(
+        session.get_bind(),
+        user_id,
+        query,
+        snapshot.values.get("pending_after_sales"),
+    )
+    if action is not None:
+        state["messages"] = [*messages, *build_action_messages(*action)]
+        state["stop_reason"] = "completed"
+        state["tool_calls"] = 1
+        answer = parse_agent_answer(state)
+        graph.update_state(config, state, as_node="model")
+        return answer
+    if is_memory_command(query):
+        answer = apply_memory_command(session, user_id, thread_id, query)
+        session.commit()
+        state["messages"] = [
+            *messages,
+            AIMessage(
+                content=AgentPolicyAnswer(**answer.model_dump(), policy_quotes=[]).model_dump_json()
+            ),
+        ]
+        state["stop_reason"] = "completed"
+        graph.update_state(config, state, as_node="model")
+        return answer
     result = graph.invoke(state, config=config)
 
     current_turn = result.copy()

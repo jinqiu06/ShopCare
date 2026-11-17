@@ -42,6 +42,7 @@ CONVERSATION_MESSAGE_ERRORS = {
     "AGENT_NOT_CONFIGURED": (503, "对话服务配置暂不可用"),
     "AGENT_TIMEOUT": (504, "对话服务超时，请稍后查询会话状态"),
     "AGENT_UPSTREAM_ERROR": (502, "对话服务暂不可用，请稍后查询会话状态"),
+    "AGENT_CONTEXT_TOO_LARGE": (413, "当前轮上下文过长，请新建会话并缩短问题"),
 }
 
 

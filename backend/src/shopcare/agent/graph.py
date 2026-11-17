@@ -31,6 +31,7 @@ def build_agent_graph(
     checkpointer: BaseCheckpointSaver | None = None,
     validate_answers: bool = False,
     propagate_model_errors: bool = False,
+    preference_context: str | None = None,
 ):
     for name, value in (
         ("max_model_calls", max_model_calls),
@@ -71,6 +72,7 @@ def build_agent_graph(
             max_model_calls,
             validate_answers=validate_answers,
             propagate_model_errors=propagate_model_errors,
+            preference_context=preference_context,
         ),
     )
     graph.add_node(

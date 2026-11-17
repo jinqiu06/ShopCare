@@ -144,12 +144,14 @@ def test_init_registers_models_in_fresh_process():
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == [
+        "after_sales_applications",
         "after_sales_drafts",
         "conversations",
         "order_items",
         "orders",
         "policy_chunks",
         "policy_embeddings",
+        "user_preferences",
         "users",
     ]
 

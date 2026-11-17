@@ -421,8 +421,9 @@ def main(argv: list[str] | None = None) -> int:
                 source.backup(target)
         engine = build_engine(f"sqlite:///{database.as_posix()}")
         try:
+            # Upgrade only the temporary copy (e.g. user_preferences); never the source DB.
+            init_db(engine)
             if not args.run:
-                init_db(engine)
                 with Session(engine) as session, session.begin():
                     for policy in load_policies(Path("data/policies")):
                         replace_policy_chunks(session, policy, split_policy(policy))

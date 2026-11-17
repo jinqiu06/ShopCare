@@ -6,6 +6,8 @@ from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 from openai import OpenAIError
 
+from shopcare.agent.after_sales import build_after_sales_answer
+from shopcare.agent.context import build_model_context
 from shopcare.agent.prompts import build_turn_reminder
 from shopcare.agent.results import collect_policy_evidence, parse_agent_answer
 from shopcare.agent.state import AgentState
@@ -19,8 +21,10 @@ def build_model_node(
     max_model_calls: int = 3,
     validate_answers: bool = False,
     propagate_model_errors: bool = False,
+    preference_context: str | None = None,
 ):
     model = chat_client.bind_tools(tools)
+    allow_after_sales = any(tool.name == "prepare_after_sales_draft" for tool in tools)
 
     def call_model(state: AgentState) -> dict:
         if state["model_calls"] >= max_model_calls:
@@ -31,7 +35,13 @@ def build_model_node(
         require_final_json = False
         while next_calls < max_model_calls:
             messages = [*state["messages"], *updates]
-            request = [*messages, build_turn_reminder(messages)] if validate_answers else messages
+            request = build_model_context(
+                messages,
+                preference_context=preference_context,
+                reminder=build_turn_reminder(messages, allow_after_sales=allow_after_sales)
+                if validate_answers
+                else None,
+            )
             next_calls += 1
             try:
                 if require_policy:
@@ -111,7 +121,7 @@ def build_model_node(
                             SystemMessage(
                                 content="刚才的候选回答未通过格式、引用、原文摘录或执行承诺校验，未交付用户。"
                                 "请纠正：政策说明必须先检索本轮证据，不能沿用历史引用；"
-                                "本系统不能办理售后，不得承诺生成草稿/申请，也不能声称已执行。"
+                                "执行结果由代码展示，不得在模型自由文本中承诺生成草稿/申请或声称已执行。"
                                 "仅依据本轮订单事实和政策进行条件性解释。",
                                 # 下次请求的临时提醒会再次说明五字段及摘录规则。
                             )
@@ -163,7 +173,18 @@ def build_tool_node(
             update["tool_calls"] += 1
 
             try:
-                result = execute_tool(tools, tool_call["name"], tool_call["args"])
+                if len(message.tool_calls) > 1 and any(
+                    call["name"] == "prepare_after_sales_draft" for call in message.tool_calls
+                ):
+                    result = {
+                        "ok": False,
+                        "error": {
+                            "code": "INVALID_TOOL_BATCH",
+                            "message": "准备草稿必须单独调用；本批次未执行任何工具。",
+                        },
+                    }
+                else:
+                    result = execute_tool(tools, tool_call["name"], tool_call["args"])
                 if not isinstance(result, dict):
                     raise TypeError("工具结果必须为字典")
                 content = json.dumps(result, ensure_ascii=False, allow_nan=False)
@@ -182,6 +203,20 @@ def build_tool_node(
                     tool_call_id=tool_call["id"],
                 )
             )
+
+            if tool_call["name"] == "prepare_after_sales_draft" and result.get("ok") is True:
+                answer = build_after_sales_answer(tool_call["name"], result)
+                results.append(
+                    AIMessage(
+                        content=AgentPolicyAnswer(
+                            **answer.model_dump(),
+                            policy_quotes=[],
+                        ).model_dump_json()
+                    )
+                )
+                update["pending_after_sales"] = result["data"]
+                update["stop_reason"] = "completed"
+                return update
 
             error = result.get("error")
             if isinstance(error, dict) and error.get("code") in {

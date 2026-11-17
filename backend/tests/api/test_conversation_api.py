@@ -13,6 +13,7 @@ from sqlalchemy import event, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from shopcare.agent.context import ContextLimitError
 from shopcare.api import conversations as conversations_api
 from shopcare.api.dependencies import get_current_user_id, open_agent_checkpointer
 from shopcare.db import build_engine, init_db
@@ -153,6 +154,7 @@ def test_create_conversation_checkpoint_failure_rolls_back_business_record(
         "timeout",
         "upstream",
         "conflict",
+        "context_limit",
         "execution_file",
         "execution_os",
     ],
@@ -171,6 +173,8 @@ def test_message_http_closes_request_resources(client, monkeypatch, caplog, outc
         run.side_effect = RuntimeError("simulated execution failure")
     elif outcome == "conflict":
         run.side_effect = ConversationTurnConflictError("private conflict detail")
+    elif outcome == "context_limit":
+        run.side_effect = ContextLimitError("private context detail")
     elif outcome in {"execution_file", "execution_os"}:
         run.side_effect = (
             FileNotFoundError("execution file missing")
@@ -209,6 +213,11 @@ def test_message_http_closes_request_resources(client, monkeypatch, caplog, outc
                 "timeout": (504, "AGENT_TIMEOUT", "对话服务超时，请稍后查询会话状态"),
                 "upstream": (502, "AGENT_UPSTREAM_ERROR", "对话服务暂不可用，请稍后查询会话状态"),
                 "conflict": (409, "CONVERSATION_NOT_READY", "会话当前不可执行"),
+                "context_limit": (
+                    413,
+                    "AGENT_CONTEXT_TOO_LARGE",
+                    "当前轮上下文过长，请新建会话并缩短问题",
+                ),
             }[outcome]
             assert response.status_code == expected[0]
             assert response.json() == {"error": {"code": expected[1], "message": expected[2]}}
@@ -451,6 +460,87 @@ def test_message_http_two_turns_persist_history_and_retrieve_current_evidence(cl
         chat_factory.call_args_list[0].kwargs["http_client"]
         is not (chat_factory.call_args_list[1].kwargs["http_client"])
     )
+
+
+def test_memory_commands_use_existing_http_route_and_skip_provider(client, monkeypatch):
+    chat, embedding = Mock(), Mock()
+    monkeypatch.setattr(message_service, "build_chat_client", Mock(return_value=chat))
+    monkeypatch.setattr(message_service, "build_embedding_client", Mock(return_value=embedding))
+    conversations = [
+        client.post("/api/conversations", json={"as_of": "2026-11-17"}).json() for _ in range(2)
+    ]
+    for record, query, expected in (
+        (conversations[0], "记住偏好：回答简短", "已保存偏好：回答简短"),
+        (conversations[1], "查看偏好", "已保存偏好：回答简短"),
+        (conversations[1], "忘记偏好：回答长度", "已删除"),
+        (conversations[0], "查看偏好", "没有保存"),
+    ):
+        result = client.post(f"/api/conversations/{record['id']}/messages", json={"query": query})
+        assert result.status_code == 200, result.text
+        assert expected in result.json()["answer"]
+        assert client.get(f"/api/conversations/{record['id']}").json()["status"] == "ready"
+    chat.bind_tools.return_value.invoke.assert_not_called()
+    embedding.embed_query.assert_not_called()
+
+
+def test_conversation_http_prepares_displays_confirms_and_replays_actual_application(
+    client, monkeypatch
+):
+    with Session(app.state.engine) as session, session.begin():
+        session.add(
+            PolicyChunkRecord(
+                chunk_id="digital-exchange:v2:000",
+                policy_id="digital-exchange",
+                version="v2",
+                title="模拟换货政策",
+                category="数码",
+                effective_from=date(2026, 10, 1),
+                text="签收15日内收集故障描述；提交需要明确确认。",
+                start_char=0,
+                end_char=24,
+            )
+        )
+    chat, embedding = Mock(), Mock()
+    chat.bind_tools.return_value.invoke.side_effect = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "id": "prepare-http",
+                    "name": "prepare_after_sales_draft",
+                    "args": {
+                        "order_id": "O004",
+                        "item_id": "O004-I01",
+                        "request_type": "exchange",
+                        "reason": "耳机单侧无声",
+                        "facts": {"issue_type": "malfunction"},
+                    },
+                }
+            ],
+        )
+    ]
+    monkeypatch.setattr(message_service, "build_chat_client", Mock(return_value=chat))
+    monkeypatch.setattr(message_service, "build_embedding_client", Mock(return_value=embedding))
+    created = client.post("/api/conversations", json={"as_of": "2026-11-02"}).json()
+    path = f"/api/conversations/{created['id']}/messages"
+    prepared = client.post(path, json={"query": "申请售后：O004的O004-I01耳机单侧无声，我想换货"})
+    assert prepared.status_code == 200, prepared.text
+    answer = prepared.json()["answer"]
+    command = answer.split("内容无误后发送完整指令：", 1)[1].splitlines()[0]
+    draft_id = command.split()[1]
+    draft_path = f"/api/after-sales/drafts/{draft_id}"
+    assert client.get(draft_path).json()["status"] == "pending"
+    first = client.post(path, json={"query": command})
+    assert first.status_code == 200, first.text
+    application = client.get(draft_path + "/application").json()
+    assert application["id"] in first.json()["answer"]
+    assert application["status"] == "pending_review"
+    assert client.get(draft_path).json()["status"] == "submitted"
+    replay = client.post(path, json={"query": command})
+    assert replay.json() == first.json()
+    assert client.get(f"/api/conversations/{created['id']}").json()["status"] == "ready"
+    chat.bind_tools.return_value.invoke.assert_called_once()
+    embedding.embed_query.assert_not_called()
 
 
 @pytest.mark.parametrize("owner", ["U001", "U002"])
