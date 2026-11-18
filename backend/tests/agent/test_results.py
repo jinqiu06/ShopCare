@@ -15,6 +15,64 @@ from shopcare.schemas.answers import PolicyAnswer, PolicyQuote
 from shopcare.schemas.policy_models import SemanticPolicySearchHit
 
 
+@pytest.mark.parametrize("lookup_order,expected_days", [("O004", "3 天"), ("O005", None)])
+def test_digital_exchange_response_uses_original_policy_and_only_matching_order_facts(
+    quote_evidence,
+    lookup_order,
+    expected_days,
+):
+    hit = quote_evidence[0].model_dump(mode="json")
+    hit["chunk"].update(
+        chunk_id="digital-exchange:v2:000", policy_id="digital-exchange", version="v2"
+    )
+    chunk = hit["chunk"]
+    policy_id = chunk["chunk_id"]
+    messages = [
+        HumanMessage(content="耳机单侧无声，可以申请换货吗？"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {"id": "lookup", "name": "lookup_order", "args": {"order_id": lookup_order}},
+                {"id": "policy", "name": "search_order_policies", "args": {"order_id": "O004"}},
+            ],
+        ),
+        ToolMessage(
+            tool_call_id="lookup",
+            content=json.dumps(
+                {
+                    "ok": True,
+                    "data": {"id": lookup_order, "days_since_delivery": 3},
+                }
+            ),
+        ),
+        ToolMessage(tool_call_id="policy", content=json.dumps({"ok": True, "data": [hit]})),
+        AIMessage(
+            content=json.dumps(
+                {
+                    "status": "answered",
+                    "answer": "出厂缺陷或运输损坏都属于质量问题，已签收 5 天。",
+                    "citation_chunk_ids": [policy_id],
+                    "limitations": ["需要核实产品缺陷。"],
+                    "policy_quotes": [{"chunk_id": policy_id, "quote": chunk["text"]}],
+                }
+            )
+        ),
+    ]
+    answer = parse_agent_answer(
+        {
+            "messages": messages,
+            "model_calls": 2,
+            "tool_calls": 2,
+            "stop_reason": "completed",
+        }
+    )
+    assert answer.citation_chunk_ids == [policy_id]
+    assert chunk["text"] in answer.answer
+    assert all(term not in answer.answer for term in ("出厂缺陷", "运输损坏", "5 天"))
+    assert "产品缺陷" not in "".join(answer.limitations)
+    assert ("3 天" in answer.answer) is (expected_days is not None)
+
+
 @pytest.fixture
 def quote_evidence():
     return [

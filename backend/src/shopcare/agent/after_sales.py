@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -52,6 +53,13 @@ def build_after_sales_answer(name: str, result: dict) -> PolicyAnswer:
         return PolicyAnswer(
             status="needs_clarification",
             answer=f"草稿 {draft.id} 已取消，未提交申请。",
+            citation_chunk_ids=[],
+            limitations=[],
+        )
+    if data.get("expired") is True:
+        return PolicyAnswer(
+            status="needs_clarification",
+            answer=f"草稿 {draft.id} 已过期，未提交申请。如需继续，请重新申请售后。",
             citation_chunk_ids=[],
             limitations=[],
         )
@@ -181,6 +189,11 @@ def run_after_sales_command(
                     else None
                 ),
             }
+            if name == "view_after_sales_draft" and current.status == "pending":
+                # Keep the result stable when validating this answer from a later checkpoint.
+                data["expired"] = current.expires_at <= datetime.now(timezone.utc).replace(
+                    tzinfo=None
+                )
         return name, {"ok": True, "data": data}
     except LookupError:
         return name, {"ok": False, "error": {"message": "草稿不存在或不可访问。"}}

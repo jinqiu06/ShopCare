@@ -1,15 +1,15 @@
 # ShopCare 结构与运行流程
 
-核对日期：2026-11-17。最新新增流程见文末；下方保留各阶段验证记录。
+核对日期：2026-11-18。可复现步骤与需求覆盖情况见[交付演示与验收](delivery-acceptance.md)。下方保留各阶段验证记录。
 
 ## 当前状态
 
-- 售后草稿、明确确认、提交前重查、模拟申请幂等登记和按归属查询已接HTTP。多轮Agent已接草稿准备/展示，完整确认/取消指令由代码处理；独立run_agent只读。未连接退款系统，本轮仅离线集成验收。
+- 售后草稿、明确确认、提交前重查、模拟申请幂等登记和按归属查询已接 HTTP。多轮 Agent 可准备和展示草稿，完整确认与取消指令由代码处理。独立 run_agent 保持只读。11 月 18 日使用真实模型跑通一个固定换货场景，答复仍出现政策未列的成因示例。
 
 - 已运行验证：订单 API、词法检索 API、政策导入、向量构建、语义检索和十题真实对照。
 - 单次回答CLI与HTTP入口均已接入并做离线验证。此前CLI真实试跑发现能力承诺和日期问题，最终日期修复仅做一个真实样例回归；本次未新增真实模型HTTP验证。
 - HTTP 搜索仍调用词法检索，已有 answer_order CLI 与 POST /api/orders/{order_id}/answer 回答路由。启动 FastAPI 不会自动运行回答函数。
-- 订单/政策工具及LangGraph有界循环、会话HTTP/CLI已接入。11月13日完成固定核心评估和有限格式修复，真实语义仍有局限。11月17日接入有限上下文、显式篇幅偏好以及对话售后闭环；最后一项尚无真实模型试跑，不能把Mock验证称为工具选择效果已验收。
+- 订单和政策工具、LangGraph 有界循环、会话 HTTP 和 CLI 已接入。11 月 13 日完成固定核心评估和有限格式修复，11 月 17 日接入有限上下文、显式篇幅偏好以及对话售后闭环。真实用例与语义局限见交付验收记录。
 - Agent独立演示入口为scripts/run_agent.py：默认只预览，--run才执行图，并在结束后校验PolicyAnswer及引用来源；现有HTTP和answer_order仍走固定链路。
 - 持久化会话入口为scripts/chat_agent.py：新建或按conversation_id继续，由服务端校验归属、取得内部线程，逐轮保存状态并校验本轮引用；默认只预览。
 - Agent内部回答现在要求policy_quotes原文摘录：本轮来源、连续原文和引用编号覆盖均校验后，仍返回四字段PolicyAnswer；已做离线验证，11月9日新版真实模型试跑待确认。旧会话缺少此字段时CLI提示新建并保留原历史；固定HTTP回答链路未接此新检查。
@@ -28,7 +28,7 @@
 | schemas/ | Pydantic 输入输出结构与校验；不是数据库表 |
 | services/ | 核心函数：订单归属、政策加载/切分/检索、回答与引用校验 |
 | tools/ | 模型工具适配：参数说明、绑定可信身份、调用services、结构化结果；已供独立Agent图复用 |
-| agent/ | 状态/节点/条件路由、预算终止与带持久化的多轮事务编排；未接会话HTTP |
+| agent/ | 状态、节点、条件路由及预算，多轮事务编排与 Checkpoint，通过会话 HTTP 和 CLI 使用 |
 | scripts/ | main() 命令入口，组织配置、资源、事务和输出，复用 services |
 | backend/tests/ | 离线测试，使用模拟模型和临时数据库 |
 | data/policies/ | 八份自编模拟政策 JSON |
@@ -257,7 +257,8 @@ Set-Location D:\VsCode\ShopCare
 | db/models.py | `AfterSalesDraft.public_status`：有申请记录时对外submitted，原status列保留旧约束 |
 | agent/context.py | `build_model_context`, 内部 `size`：有限请求视图、完整轮次选择、序列化字符预算；不修改归档 |
 | tools/after_sales.py | `build_after_sales_tools`、内部 `prepare_after_sales_draft`：绑定用户/日期及本轮申请意向，仅准备草稿，不注册提交工具 |
-| agent/after_sales.py | `build_after_sales_answer`、`build_action_messages`、`parse_after_sales_answer`、`run_after_sales_command`：固定结果展示、可信回执校验、完整确认/取消/查看指令 |
+| agent/after_sales.py | `build_after_sales_answer`、`build_action_messages`、`parse_after_sales_answer`、`run_after_sales_command`：固定结果展示、可信回执校验、完整确认/取消/查看指令。查看时固定记录过期判断，重读历史使用原结果 |
+| agent/results.py | `parse_agent_answer` 在校验通过且只引用数码换货 v2 的固定片段时调用 `render_digital_exchange_answer`，展示政策原文及本轮同一订单的签收天数 |
 | api/errors.py | `conversation_message_http_error`：统一消息错误码到HTTP状态及公开提示的映射；原有全局响应处理器保留 |
 | api/conversations.py | `create_conversation_api`：短事务创建；`read_conversation`：按归属查询；`send_conversation_message`：复用消息服务与run_conversation_turn；三个路由均已注册 |
 | api/errors.py | `http_error_handler`, `validation_error_handler` |

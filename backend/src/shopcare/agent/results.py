@@ -1,7 +1,7 @@
 import json
 import re
 
-from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 
 from shopcare.agent.after_sales import parse_after_sales_answer
 from shopcare.agent.state import AgentState
@@ -94,7 +94,52 @@ def parse_agent_answer(state: AgentState) -> PolicyAnswer:
     evidence = collect_policy_evidence(messages)
     answer = parse_agent_policy_answer(message.content, evidence)
     validate_consultation_answer(answer)
+    if answer.status == "answered" and answer.citation_chunk_ids == ["digital-exchange:v2:000"]:
+        return render_digital_exchange_answer(answer, messages, evidence)
     return answer
+
+
+def render_digital_exchange_answer(
+    answer: PolicyAnswer,
+    messages: list[BaseMessage],
+    evidence: list[SemanticPolicySearchHit],
+) -> PolicyAnswer:
+    """Render the verified mock exchange rule and facts for the same order."""
+    chunk_id = answer.citation_chunk_ids[0]
+    chunk = next(hit.chunk for hit in evidence if hit.chunk.chunk_id == chunk_id)
+    start = max((i for i, msg in enumerate(messages) if isinstance(msg, HumanMessage)), default=0)
+    calls = {}
+    delivery_days = {}
+    policy_orders = set()
+    for message in messages[start:]:
+        if isinstance(message, AIMessage):
+            calls.update({call["id"]: call for call in message.tool_calls})
+        elif isinstance(message, ToolMessage):
+            call = calls.pop(message.tool_call_id, None)
+            if call is None or call["name"] not in {"lookup_order", "search_order_policies"}:
+                continue
+            result = json.loads(message.content)
+            if result["ok"] is not True:
+                continue
+            order_id = call["args"]["order_id"].strip()
+            if call["name"] == "lookup_order":
+                days = result["data"].get("days_since_delivery")
+                if result["data"].get("id") == order_id and type(days) is int and days >= 0:
+                    delivery_days[order_id] = days
+            elif any(hit["chunk"]["chunk_id"] == chunk_id for hit in result["data"]):
+                policy_orders.add(order_id)
+
+    fact = ""
+    if len(policy_orders) == 1:
+        order_id = next(iter(policy_orders))
+        if order_id in delivery_days:
+            fact = f"订单 {order_id} 截至本会话参照日已签收 {delivery_days[order_id]} 天。\n"
+    return answer.model_copy(
+        update={
+            "answer": f"{fact}本轮检索到的模拟换货政策原文：\n{chunk.text}",
+            "limitations": ["故障表现仍需核实。正式提交需要您明确确认。"],
+        }
+    )
 
 
 def validate_policy_quotes(

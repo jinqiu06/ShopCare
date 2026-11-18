@@ -345,3 +345,28 @@ def test_checkpoint_failure_after_confirm_preserves_receipt_and_marks_failed(
         assert session.scalar(select(func.count()).select_from(AfterSalesApplication)) == 1
         assert session.get(AfterSalesDraft, pending["draft"]["id"]).version == 2
         assert session.get(Conversation, conversation_id).status == "failed"
+
+
+def test_view_expired_draft_removes_confirmation_and_resumes(sales_context):
+    engine, (conversation_id, _), path, embedding = sales_context
+    chat = Mock()
+    with SqliteSaver.from_conn_string(path) as saver:
+        _, pending, _, _ = prepare_turn(sales_context, saver)
+        draft_id = pending["draft"]["id"]
+        with Session(engine) as session, session.begin():
+            session.get(AfterSalesDraft, draft_id).expires_at = datetime(2020, 1, 1)
+        for query in ("查看售后", "查看售后", f"确认提交 {draft_id} 版本 1"):
+            answer = run_conversation_turn(
+                engine,
+                chat,
+                embedding,
+                saver,
+                "U001",
+                conversation_id,
+                query,
+            )
+            assert "已过期" in answer.answer
+            assert "确认提交" not in answer.answer
+    chat.bind_tools.return_value.invoke.assert_not_called()
+    with Session(engine) as session:
+        assert session.scalar(select(func.count()).select_from(AfterSalesApplication)) == 0
